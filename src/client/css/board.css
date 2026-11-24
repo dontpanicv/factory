@@ -25,7 +25,8 @@
   grid-template-columns: 232px minmax(0, 1fr) minmax(400px, 0.85fr);
 }
 
-.board__main {
+.board__main,
+.board__pane {
   container-type: inline-size;
 }
 
@@ -64,6 +65,7 @@
   align-items: center;
   height: 52px;
   padding: 0 var(--space-4) 0 var(--space-5);
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
 }
 
@@ -93,6 +95,12 @@
   color: var(--muted);
   text-decoration: none;
   border: 1px solid transparent;
+}
+
+/* The sidebar's toggle shows only where the sidebar is hidden. */
+.col-head__menu {
+  display: none;
+  margin-left: calc(var(--space-2) * -1);
 }
 
 .col-head__tool:hover {
@@ -771,6 +779,12 @@
   border: 0;
 }
 
+/* The box shows the focus: its fields draw no outline of their own. */
+.composer__text:focus-visible,
+.composer__field input:focus-visible {
+  outline: none;
+}
+
 .composer__text::placeholder {
   color: var(--muted);
 }
@@ -785,6 +799,7 @@
 
 .tool {
   display: inline-flex;
+  flex-shrink: 0;
   gap: 5px;
   align-items: center;
   min-width: 26px;
@@ -815,26 +830,21 @@
 }
 
 .composer__hint {
+  min-width: 0;
   margin-right: var(--space-3);
   margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--muted);
   white-space: nowrap;
 }
 
-.composer__send {
-  margin-left: auto;
-}
-
-.composer__hint + .composer__send {
-  margin-left: 0;
-}
-
 /* A panel of the toolbar (labels, send later) opens above the box. */
 .panel {
   position: absolute;
-  bottom: calc(100% - var(--space-2));
+  bottom: calc(100% + var(--space-1));
   left: var(--space-4);
   z-index: 5;
   display: flex;
@@ -946,15 +956,18 @@
 .ask .input {
   flex: 1;
   min-width: 180px;
+  height: 1.875rem;
   padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
 }
 
 /* Errors of a write */
 
+/* Below the header, clear of the composers at the foot of the columns. */
 .toast {
   position: fixed;
+  top: calc(var(--header-h) + var(--space-3));
   right: var(--space-5);
-  bottom: var(--space-5);
   z-index: 20;
   display: flex;
   gap: var(--space-3);
@@ -980,9 +993,10 @@
   border: 0;
 }
 
-/* A narrow main column (the pane is open) keeps the essentials. */
+/* A narrow column (the main column beside the pane, or the pane) keeps the essentials. */
 @container (max-width: 720px) {
-  .col-head__meta,
+  .board__main .col-head__meta,
+  .counts,
   .composer__hint,
   .task-row__now,
   .task-row__title .labels {
@@ -991,6 +1005,11 @@
 
   .task-row {
     grid-template-columns: 136px minmax(0, 1fr) 96px 36px;
+  }
+
+  /* Without the hint, the send button goes to the end. */
+  .composer__send {
+    margin-left: auto;
   }
 }
 
@@ -1004,8 +1023,22 @@
 
   .board__side,
   .counts,
-  .composer__hint {
+  .composer__hint,
+  .header__email {
     display: none;
+  }
+
+  .col-head__menu {
+    display: inline-grid;
+  }
+
+  .board--side .board__side {
+    position: fixed;
+    inset: var(--header-h) auto 0 0;
+    z-index: 16;
+    display: flex;
+    width: min(280px, 85vw);
+    box-shadow: var(--shadow-hard);
   }
 
   .board__pane {
@@ -1022,5 +1055,9 @@
   .task-row__now,
   .task-row__where {
     display: none;
+  }
+
+  .composer__send {
+    margin-left: auto;
   }
 }

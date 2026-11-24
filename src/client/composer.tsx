@@ -399,6 +399,7 @@ const Tool = (props: {
 }) => (
   <button
     aria-expanded={props.expanded}
+    aria-label={props.title}
     aria-pressed={props.expanded === undefined ? props.on : undefined}
     class={props.on ? "tool tool--on" : "tool"}
     onClick={props.onClick}

@@ -180,9 +180,6 @@ export const inFilter = (channel: string, filter: string | null) =>
 export const lastActive = (summary: ThreadSummaryView) =>
   Date.parse(summary.last?.createdAt ?? summary.message.createdAt);
 
-/** A channel path: lowercase parts with `/` between them, as `fix/pipes`. */
-export const CHANNEL_PATH = /^[a-z0-9_-]+(\/[a-z0-9_-]+)*$/;
-
 const LABEL_PAIR = /^([^=\s]+)\s*=(.*)$/;
 const TASK_REF = /^#?(\d{1,12})$/;
 const NEEDS_SEPARATOR = /[\s,]+/;

@@ -9,7 +9,6 @@ import {
   actorName,
   type BoardQuery,
   boardHref,
-  CHANNEL_PATH,
   countStates,
   FILTER_HELP,
   FILTER_LABEL,
@@ -229,7 +228,7 @@ const NewChannel = (props: {
         class="input mono"
         name="path"
         onKeyDown={cancel}
-        pattern={CHANNEL_PATH.source.slice(1, -1)}
+        pattern="[a-z0-9_\-]+(/[a-z0-9_\-]+)*"
         placeholder="fix/web"
         required
         title="Lowercase parts with / between them. The part before / groups the channel."
@@ -398,6 +397,7 @@ const MainHead = (props: {
   readonly connection: Connection;
   readonly data: BoardData;
   readonly now: number;
+  readonly onMenu: () => void;
   readonly query: BoardQuery;
 }) => {
   const { query } = props;
@@ -413,6 +413,14 @@ const MainHead = (props: {
   const canSwitch = query.channel !== null && !query.channel.endsWith("/");
   return (
     <header class="col-head">
+      <button
+        aria-label="Channels"
+        class="col-head__menu col-head__tool"
+        onClick={props.onMenu}
+        type="button"
+      >
+        ☰
+      </button>
       <h1 class="col-head__title">{title}</h1>
       <span class="col-head__meta truncate">{meta}</span>
       <span class="spacer" />
@@ -770,6 +778,7 @@ export const BoardMain = (props: {
   readonly data: BoardData;
   readonly now: number;
   readonly onError: (message: string) => void;
+  readonly onMenu: () => void;
   readonly onSent: (sent: Sent) => void;
   readonly query: BoardQuery;
 }) => {
@@ -796,6 +805,7 @@ export const BoardMain = (props: {
         connection={props.connection}
         data={data}
         now={now}
+        onMenu={props.onMenu}
         query={query}
       />
       {body}

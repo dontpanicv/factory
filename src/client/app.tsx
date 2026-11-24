@@ -174,9 +174,22 @@ const Board = (props: {
   );
   const known = knownLabels(data?.open ?? []);
 
+  // On a narrow screen the sidebar opens over the board, and closes when the view changes.
+  const [side, setSide] = useState(false);
+  const toggleSide = () => setSide((open) => !open);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new view closes the sidebar.
+  useEffect(() => setSide(false), [listKey, query.thread]);
+
   const pane = query.thread !== null && thread !== undefined;
+  const classes = ["board"];
+  if (pane) {
+    classes.push("board--pane");
+  }
+  if (side) {
+    classes.push("board--side");
+  }
   return (
-    <div class={pane ? "board board--pane" : "board"}>
+    <div class={classes.join(" ")}>
       {data === null ? (
         <p class="empty">Loading…</p>
       ) : (
@@ -187,6 +200,7 @@ const Board = (props: {
             data={data}
             now={now}
             onError={setError}
+            onMenu={toggleSide}
             onSent={sent}
             query={query}
           />
