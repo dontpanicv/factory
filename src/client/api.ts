@@ -57,3 +57,31 @@ export const get = <A>(
 
 export const post = <A = unknown>(path: string, body?: unknown) =>
   call<A>("POST", path, body ?? {});
+
+/** The most one upload takes: a bigger file needs a direct upload, which a `local()` board has not. */
+export const UPLOAD_BYTES_MAX = 4 * 1024 * 1024;
+
+/** Uploads one file: the body is the file. A post then names it by its ID. */
+export const upload = async (file: File) => {
+  const response = await fetch(`${BOARD_API}/attachments`, {
+    body: file,
+    credentials: "same-origin",
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "x-board-filename": encodeURIComponent(file.name),
+    },
+    method: "POST",
+  });
+  const json = (await response.json()) as {
+    attachment?: { id: string };
+    error?: { code?: string; message?: string };
+  };
+  if (!(response.ok && json.attachment)) {
+    throw new ApiError(
+      json.error?.code ?? "error",
+      json.error?.message ?? `HTTP ${response.status}`,
+      response.status
+    );
+  }
+  return json.attachment.id;
+};

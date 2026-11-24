@@ -2,6 +2,7 @@ import type { MessageView, ThreadSummaryView } from "@vercel/board";
 import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { get, post } from "./api.ts";
+import { Composer, type Sent } from "./composer.tsx";
 import { Avatar, Labels, Message, StateMark, Timeline } from "./message.tsx";
 import {
   ACTIVE_FILTERS,
@@ -14,9 +15,8 @@ import {
   FILTER_LABEL,
   FINISHED_FILTERS,
   inFilter,
+  knownLabels,
   lastActive,
-  parseLabels,
-  parseNeeds,
   shortAge,
   stateNow,
   TASK_FILTERS,
@@ -150,19 +150,6 @@ export type Run = (write: () => Promise<unknown>) => Promise<boolean>;
 export const fieldOf = (form: HTMLFormElement, name: string) => {
   const value = new FormData(form).get(name);
   return typeof value === "string" ? value.trim() : "";
-};
-
-/** Enter sends the form of a composer; Shift+Enter makes a new line. */
-export const sendOnEnter = (event: KeyboardEvent) => {
-  if (
-    event.key === "Enter" &&
-    !event.shiftKey &&
-    !event.isComposing &&
-    event.currentTarget instanceof HTMLTextAreaElement
-  ) {
-    event.preventDefault();
-    event.currentTarget.form?.requestSubmit();
-  }
 };
 
 // The sidebar
@@ -735,107 +722,46 @@ const TaskGrid = (props: {
   </>
 );
 
-/** The composer below a feed starts a thread, or a task with labels and the tasks it waits for. */
-const Composer = (props: {
+/** The composer of the main column: where it posts, and what it starts, by the view. */
+const MainComposer = (props: {
   readonly data: BoardData;
+  readonly onError: (message: string) => void;
+  readonly onSent: (sent: Sent) => void;
   readonly query: BoardQuery;
-  readonly run: Run;
 }) => {
   const { data, query } = props;
-  const [task, setTask] = useState(true);
-  const toggleTask = () => setTask((value) => !value);
-  const fixed = query.view === "channel" ? query.channel : null;
+  const known = knownLabels(data.open);
   const paths = data.channels.map((channel) => channel.path);
-  const create = async (event: SubmitEvent) => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const body = {
-      channel: fixed ?? fieldOf(form, "channel"),
-      labels: parseLabels(fieldOf(form, "labels")),
-      text: fieldOf(form, "text"),
-    };
-    let id = "";
-    const sent = await props.run(async () => {
-      if (task) {
-        ({
-          task: { id },
-        } = await post<{ task: { id: string } }>("/tasks", {
-          ...body,
-          needs: parseNeeds(fieldOf(form, "needs")),
-        }));
-      } else {
-        ({
-          message: { id },
-        } = await post<{ message: { id: string } }>("/messages", body));
-      }
-    });
-    if (sent) {
-      form.reset();
-      navigate(boardHref(query, { thread: id }));
-    }
-  };
-  return (
-    <form class="compose" key={fixed ?? ""} onSubmit={create}>
-      {fixed === null ? (
-        <select
-          aria-label="Channel"
-          class="compose__channel mono"
-          defaultValue=""
-          name="channel"
-          required
-        >
-          <option disabled value="">
-            {paths.length === 0 ? "make a channel first" : "# channel"}
-          </option>
-          {paths.map((path) => (
-            <option key={path} value={path}>{`#${path}`}</option>
-          ))}
-        </select>
-      ) : null}
-      <textarea
-        aria-label={task ? "New task" : "New thread"}
-        class="compose__text"
-        name="text"
-        onKeyDown={sendOnEnter}
-        placeholder={
-          task
-            ? `new task${fixed === null ? "" : ` in #${fixed}`}… the first line is its title`
-            : `start a thread${fixed === null ? "" : ` in #${fixed}`}…`
-        }
-        required
+  const exact =
+    query.channel !== null && !query.channel.endsWith("/")
+      ? query.channel
+      : undefined;
+  if (query.view === "channel" && exact !== undefined) {
+    return (
+      <Composer
+        channel={exact}
+        known={known}
+        onError={props.onError}
+        onSent={props.onSent}
+        placeholder={`message #${exact}…`}
+        scope={`channel:${exact}`}
+        tasks="toggle"
       />
-      {task ? (
-        <div class="compose__fields">
-          <input
-            aria-label="Labels"
-            autoComplete="off"
-            class="input mono"
-            name="labels"
-            placeholder="labels: kind=code, team=web"
-          />
-          <input
-            aria-label="Starts after"
-            autoComplete="off"
-            class="input mono"
-            name="needs"
-            placeholder="starts after: #12 #14"
-          />
-        </div>
-      ) : null}
-      <div class="compose__bar">
-        <label class="compose__toggle">
-          <input checked={task} onChange={toggleTask} type="checkbox" />
-          make it a task
-        </label>
-        <span class="spacer" />
-        <span class="compose__hint">
-          enter to send · shift+enter for a new line
-        </span>
-        <button class="button button--primary button--small" type="submit">
-          Send
-        </button>
-      </div>
-    </form>
+    );
+  }
+  const tasks = query.view === "tasks";
+  const inSubtree = paths.filter((path) => inFilter(path, query.channel));
+  return (
+    <Composer
+      channels={inSubtree.length === 0 ? paths : inSubtree}
+      known={known}
+      onError={props.onError}
+      onSent={props.onSent}
+      placeholder="start a thread…"
+      scope={tasks ? "tasks" : "activity"}
+      tasks={tasks ? "always" : "toggle"}
+      {...(exact === undefined ? {} : { channel: exact })}
+    />
   );
 };
 
@@ -843,8 +769,9 @@ export const BoardMain = (props: {
   readonly connection: Connection;
   readonly data: BoardData;
   readonly now: number;
+  readonly onError: (message: string) => void;
+  readonly onSent: (sent: Sent) => void;
   readonly query: BoardQuery;
-  readonly run: Run;
 }) => {
   const { data, now, query } = props;
   const { listing } = data;
@@ -872,9 +799,12 @@ export const BoardMain = (props: {
         query={query}
       />
       {body}
-      {listing.kind === "tasks" ? null : (
-        <Composer data={data} query={query} run={props.run} />
-      )}
+      <MainComposer
+        data={data}
+        onError={props.onError}
+        onSent={props.onSent}
+        query={query}
+      />
     </section>
   );
 };

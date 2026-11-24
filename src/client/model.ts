@@ -272,3 +272,13 @@ export const countStates = (roots: readonly MessageView[], now: number) => {
   }
   return counts;
 };
+
+/** The labels in use on the given messages, as `key=value`, for suggestions. */
+export const knownLabels = (roots: readonly MessageView[]) =>
+  [
+    ...new Set(
+      roots.flatMap((root) =>
+        visibleLabels(root.labels).map(([key, value]) => `${key}=${value}`)
+      )
+    ),
+  ].sort();

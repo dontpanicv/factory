@@ -7,7 +7,13 @@ import {
   loadBoard,
   type Run,
 } from "./board.tsx";
-import { type BoardQuery, boardHref, boardQuery } from "./model.ts";
+import type { Sent } from "./composer.tsx";
+import {
+  type BoardQuery,
+  boardHref,
+  boardQuery,
+  knownLabels,
+} from "./model.ts";
 import { loadThread, type ThreadData, ThreadPane } from "./pane.tsx";
 import { followLink, navigate, useUrl } from "./route.ts";
 
@@ -65,10 +71,10 @@ const isTyping = (target: EventTarget | null) =>
 const useKeys = (query: BoardQuery) => {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (query.thread === null || event.defaultPrevented) {
+      if (event.defaultPrevented) {
         return;
       }
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && query.thread !== null) {
         navigate(boardHref(query, { thread: null }));
         return;
       }
@@ -77,9 +83,12 @@ const useKeys = (query: BoardQuery) => {
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey;
-      const reply = document.getElementById("reply");
-      if (printable && !isTyping(event.target) && reply !== null) {
-        reply.focus();
+      // The open thread's composer first, as the viewer does.
+      const composer =
+        document.querySelector<HTMLElement>('[data-composer="reply"]') ??
+        document.querySelector<HTMLElement>('[data-composer="main"]');
+      if (printable && !isTyping(event.target) && composer !== null) {
+        composer.focus();
       }
     };
     addEventListener("keydown", onKey);
@@ -153,6 +162,18 @@ const Board = (props: {
     [reload]
   );
 
+  /** After a post: open the new thread, and load the views again. */
+  const sent = useCallback(
+    ({ id }: Sent) => {
+      if (id !== null) {
+        navigate(boardHref(query, { thread: id }));
+      }
+      reload();
+    },
+    [query, reload]
+  );
+  const known = knownLabels(data?.open ?? []);
+
   const pane = query.thread !== null && thread !== undefined;
   return (
     <div class={pane ? "board board--pane" : "board"}>
@@ -165,13 +186,22 @@ const Board = (props: {
             connection={connection}
             data={data}
             now={now}
+            onError={setError}
+            onSent={sent}
             query={query}
-            run={run}
           />
         </>
       )}
       {pane ? (
-        <ThreadPane data={thread} now={now} query={query} run={run} />
+        <ThreadPane
+          data={thread}
+          known={known}
+          now={now}
+          onError={setError}
+          onSent={sent}
+          query={query}
+          run={run}
+        />
       ) : null}
       {error === null ? null : (
         <div class="toast" role="alert">

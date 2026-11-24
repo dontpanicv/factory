@@ -2,7 +2,8 @@ import type { MessageView, ThreadView } from "@vercel/board";
 import { type ComponentChildren, Fragment } from "preact";
 import { useState } from "preact/hooks";
 import { ApiError, get, post } from "./api.ts";
-import { fieldOf, type Run, sendOnEnter } from "./board.tsx";
+import { fieldOf, type Run } from "./board.tsx";
+import { Composer, type Sent } from "./composer.tsx";
 import { Lease, Linked, Message, StateMark, Timeline } from "./message.tsx";
 import {
   actorName,
@@ -291,61 +292,14 @@ const TaskCard = (props: {
   );
 };
 
-const ReplyForm = (props: {
-  readonly root: MessageView;
-  readonly run: Run;
-}) => {
-  const blocked = props.root.task?.state === "blocked";
-  const send = async (event: SubmitEvent) => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const unblock = blocked && new FormData(form).get("unblock") === "on";
-    const sent = await props.run(async () => {
-      await post("/messages", {
-        re: props.root.id,
-        text: fieldOf(form, "text"),
-      });
-      if (unblock) {
-        await post(`/tasks/${props.root.id}/unblock`);
-      }
-    });
-    if (sent) {
-      form.reset();
-    }
-  };
-  return (
-    <form class="compose compose--reply" onSubmit={send}>
-      <textarea
-        aria-label="Reply"
-        class="compose__text"
-        id="reply"
-        name="text"
-        onKeyDown={sendOnEnter}
-        placeholder={
-          blocked ? "answer, or say what to do next…" : "reply to thread…"
-        }
-        required
-      />
-      <div class="compose__bar">
-        {blocked ? (
-          <label class="compose__toggle">
-            <input defaultChecked name="unblock" type="checkbox" />
-            continue the task
-          </label>
-        ) : null}
-        <span class="spacer" />
-        <button class="button button--primary button--small" type="submit">
-          Send
-        </button>
-      </div>
-    </form>
-  );
-};
-
 /** The pane of the open thread: the task card, the thread, and the reply composer. */
 export const ThreadPane = (props: {
   readonly data: ThreadData | null;
+  /** The labels in use, as `key=value`, for the composer's suggestions. */
+  readonly known: readonly string[];
   readonly now: number;
+  readonly onError: (message: string) => void;
+  readonly onSent: (sent: Sent) => void;
   readonly query: BoardQuery;
   readonly run: Run;
 }) => {
@@ -423,7 +377,17 @@ export const ThreadPane = (props: {
             <TaskCard data={data} now={now} query={query} run={props.run} />
             <Timeline item={item} messages={[root, ...replies]} now={now} />
           </div>
-          <ReplyForm key={root.id} root={root} run={props.run} />
+          <Composer
+            continues={root.task?.state === "blocked"}
+            key={root.id}
+            known={props.known}
+            onError={props.onError}
+            onSent={props.onSent}
+            placeholder="reply to thread…"
+            re={root.id}
+            scope={`thread:${root.id}`}
+            tasks="never"
+          />
         </>
       )}
     </aside>

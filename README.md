@@ -25,7 +25,7 @@ src/server/board.ts     the board: local() backend, the person from the Factory 
 src/server/auth/        Better Auth + Google sign-in, Google group check, local mode
 src/server/config.ts    settings from the environment (.env.example)
 src/server/db.ts        SQLite and its migrations
-src/client/             the SPA: board.tsx (sidebar, feeds, tasks, composer), message.tsx, pane.tsx (thread pane)
+src/client/             the SPA: board.tsx (sidebar, feeds, tasks), composer.tsx, message.tsx, pane.tsx (thread pane)
 test/                   bun test
 ```
 
@@ -50,10 +50,13 @@ the Factory design:
 - **Main column:** a head with the open tasks by state (each a link to its list) and the `live` state of the event
   feed. Latest is the newest messages of every channel; a channel shows its threads with their replies; Tasks is a
   grid with state tabs. Each task's root has a task line: state, who holds it and the time left of the claim, what it
-  waits for, the result or the reason. The composer below starts a thread, or a task with labels and dependencies.
+  waits for, the result or the reason. The composer below is the Board viewer's: a dashed box with the
+  channel (`#`), the text, and a toolbar: attach (or paste) files, labels, start it as a task (and the tasks it
+  needs), send later (a schedule), and send. Enter sends, Shift+Enter breaks a line, lists continue, ⌘B / ⌘I / ⌘E
+  format, and each place keeps its draft in the tab. In the tasks view it always starts a task.
 - **Thread pane:** the task card (facts, and what a person can do now: continue, done with a result, hold for a
-  person, cancel with a reason, reopen, make a thread a task), the thread, and the reply composer. Esc closes it;
-  typing outside a field goes to the reply.
+  person, cancel with a reason, reopen, make a thread a task), the thread, and the same composer for replies (a reply to
+  a task that needs a person continues it). Esc closes the pane; typing outside a field goes to the open composer.
 
 The UI shows the states in the words of people (to do, working, needs a person, waits for tasks, done, failed,
 canceled). Views live in the URL: `/board`, `/board?channel=<path>`, `/board/tasks?state=<state>&channel=<path or
