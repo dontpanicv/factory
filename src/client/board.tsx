@@ -1,70 +1,73 @@
 import type { MessageView, ThreadSummaryView } from "@vercel/board";
+import type { ComponentChildren } from "preact";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { get, post } from "./api.ts";
+import { Avatar, Labels, Message, StateMark, Timeline } from "./message.tsx";
 import {
   ACTIVE_FILTERS,
   actorName,
   type BoardQuery,
-  type BoardView,
   boardHref,
-  bodyOf,
   CHANNEL_PATH,
+  countStates,
   FILTER_HELP,
   FILTER_LABEL,
   FINISHED_FILTERS,
-  formatAge,
-  formatAgo,
   inFilter,
   lastActive,
   parseLabels,
   parseNeeds,
-  STATE_LABEL,
-  STATE_MARK,
+  shortAge,
   stateNow,
   TASK_FILTERS,
   type TaskFilter,
-  timeLeft,
+  type TaskState,
   titleOf,
   visibleLabels,
 } from "./model.ts";
 import { navigate } from "./route.ts";
 
 /**
- * The board has the structure of the Board viewer (`vb inspect`): a sidebar with the activity, the
- * tasks and the channels; the main view with a composer below it; and the pane of the open thread.
+ * The board has the layout of the Board viewer (`vb inspect`): a sidebar with the activity, the tasks
+ * and the channels; the main column with the feed or the tasks and a composer; and the thread pane.
  */
 
 const OPEN_LIMIT = 200;
 const LIST_LIMIT = 200;
 const THREAD_LIMIT = 100;
 const CHANNEL_LIMIT = 500;
-const SPACES = /\s+/g;
+/** How many of the feed's newest events fill the activity view: the most that one read answers. */
+const RECENT_EVENTS = 100;
+/** The feed is at its bottom when less than this many pixels are below the view. */
+const BOTTOM_SLACK_PX = 48;
+
+interface Channel {
+  readonly open: number;
+  readonly path: string;
+  readonly threads?: number;
+}
+
+/** What the main column lists: messages (activity), a channel's threads, or tasks. */
+export type Listing =
+  | { readonly kind: "feed"; readonly messages: readonly MessageView[] }
+  | {
+      readonly kind: "threads";
+      readonly threads: readonly ThreadSummaryView[];
+    }
+  | { readonly kind: "tasks"; readonly tasks: readonly ThreadSummaryView[] };
 
 export interface BoardData {
-  /** Every channel, with its open tasks. */
-  readonly channels: ReadonlyArray<{
-    readonly open: number;
-    readonly path: string;
-  }>;
-  /** The open tasks of the view's channel filter, by state, for the tabs. */
-  readonly counts: Readonly<Partial<Record<TaskFilter, number>>>;
-  readonly open: { readonly blocked: number; readonly total: number };
-  /** What the composer suggests: labels, and the open tasks that a new task can start after. */
-  readonly suggest: {
-    readonly labels: readonly string[];
-    readonly tasks: ReadonlyArray<{
-      readonly id: string;
-      readonly title: string;
-    }>;
-  };
-  /** The view's threads (activity, channel: the board gives the newest last) or tasks. */
-  readonly threads: readonly ThreadSummaryView[];
+  readonly channels: readonly Channel[];
+  readonly listing: Listing;
+  /** The roots of the open tasks of the whole board. */
+  readonly open: readonly MessageView[];
 }
 
 interface TasksPage {
   readonly tasks: ThreadSummaryView[];
 }
 
-const listTasks = async (query: BoardQuery) => {
+const listTasks = async (query: BoardQuery): Promise<Listing> => {
   const finished = FINISHED_FILTERS.has(query.state);
   const page = await get<TasksPage>("/tasks", {
     channel: query.channel ?? undefined,
@@ -72,559 +75,81 @@ const listTasks = async (query: BoardQuery) => {
     limit: LIST_LIMIT,
     state: query.state,
   });
-  return finished
-    ? page.tasks.toSorted((a, b) => lastActive(b) - lastActive(a))
-    : page.tasks;
-};
-
-const listThreads = async (query: BoardQuery) => {
-  const page = await get<{ threads: ThreadSummaryView[] }>("/threads", {
-    channel:
-      query.view === "channel" ? (query.channel ?? undefined) : undefined,
-    limit: THREAD_LIMIT,
-  });
-  return page.threads;
-};
-
-export const loadBoard = async (query: BoardQuery): Promise<BoardData> => {
-  const [open, channels, threads] = await Promise.all([
-    get<TasksPage>("/tasks", { limit: OPEN_LIMIT, state: "open" }),
-    get<{ channels: Array<{ path: string }> }>("/channels", {
-      limit: CHANNEL_LIMIT,
-    }),
-    query.view === "tasks" ? listTasks(query) : listThreads(query),
-  ]);
-  const roots = open.tasks.map(({ message }) => message);
-  const counts: Partial<Record<TaskFilter, number>> = {};
-  for (const root of roots) {
-    const state = root.task?.state;
-    if (state !== undefined && inFilter(root.channel, query.channel)) {
-      counts[state] = (counts[state] ?? 0) + 1;
-      counts.open = (counts.open ?? 0) + 1;
-    }
-  }
   return {
-    channels: channels.channels.map(({ path }) => ({
-      open: roots.filter((root) => root.channel === path).length,
-      path,
-    })),
-    counts,
-    open: {
-      blocked: roots.filter((root) => root.task?.state === "blocked").length,
-      total: roots.length,
-    },
-    suggest: {
-      labels: [
-        ...new Set(
-          roots.flatMap((root) =>
-            visibleLabels(root.labels).map(([key, value]) => `${key}=${value}`)
-          )
-        ),
-      ].sort(),
-      tasks: roots
-        .map((root) => ({ id: root.id, title: titleOf(root.text) }))
-        .toReversed(),
-    },
-    threads,
+    kind: "tasks",
+    tasks: finished
+      ? page.tasks.toSorted((a, b) => lastActive(b) - lastActive(a))
+      : page.tasks,
   };
 };
 
-/** The trimmed value of a form field. */
-export const fieldOf = (form: HTMLFormElement, name: string) => {
-  const value = new FormData(form).get(name);
-  return typeof value === "string" ? value.trim() : "";
+/** The newest messages across every channel, oldest first: from the newest events of the board's feed. */
+const listRecent = async (): Promise<Listing> => {
+  const page = await get<{ events: Array<{ message?: MessageView }> }>(
+    "/events",
+    { last: RECENT_EVENTS }
+  );
+  const messages = new Map<string, MessageView>();
+  for (const { message } of page.events) {
+    if (
+      message !== undefined &&
+      (messages.get(message.id)?.version ?? -1) < message.version
+    ) {
+      messages.set(message.id, message);
+    }
+  }
+  return {
+    kind: "feed",
+    messages: [...messages.values()].toSorted(
+      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+    ),
+  };
+};
+
+const listThreads = async (channel: string): Promise<Listing> => {
+  const page = await get<{ threads: ThreadSummaryView[] }>("/threads", {
+    channel,
+    limit: THREAD_LIMIT,
+  });
+  return { kind: "threads", threads: page.threads };
+};
+
+const listingOf = (query: BoardQuery) => {
+  if (query.view === "tasks") {
+    return listTasks(query);
+  }
+  return query.view === "channel" && query.channel !== null
+    ? listThreads(query.channel)
+    : listRecent();
+};
+
+export const loadBoard = async (query: BoardQuery): Promise<BoardData> => {
+  const [open, channels, listing] = await Promise.all([
+    get<TasksPage>("/tasks", { limit: OPEN_LIMIT, state: "open" }),
+    get<{ channels: Array<{ path: string; threads?: number }> }>("/channels", {
+      limit: CHANNEL_LIMIT,
+    }),
+    listingOf(query),
+  ]);
+  const roots = open.tasks.map(({ message }) => message);
+  return {
+    channels: channels.channels.map((channel) => ({
+      open: roots.filter((root) => root.channel === channel.path).length,
+      path: channel.path,
+      ...(channel.threads === undefined ? {} : { threads: channel.threads }),
+    })),
+    listing,
+    open: roots,
+  };
 };
 
 /** What a person does with the board: each write reloads the view, and a failure shows its message. */
 export type Run = (write: () => Promise<unknown>) => Promise<boolean>;
 
-// The sidebar
-
-const SideItem = (props: {
-  readonly alert?: boolean;
-  readonly count?: number;
-  readonly current: boolean;
-  readonly href: string;
-  readonly label: string;
-  readonly title: string;
-}) => (
-  <a
-    aria-current={props.current ? "page" : undefined}
-    class="side__item"
-    href={props.href}
-    title={props.title}
-  >
-    <span class="truncate">{props.label}</span>
-    <span class="spacer" />
-    {props.count === undefined || props.count === 0 ? null : (
-      <span
-        class={
-          props.alert === true
-            ? "side__count side__count--alert"
-            : "side__count"
-        }
-      >
-        {props.count}
-      </span>
-    )}
-  </a>
-);
-
-/** The channels by the first part of their path: `detect/sre` is `#sre` under `detect`. */
-const channelGroups = (channels: BoardData["channels"]) => {
-  const groups = new Map<string, BoardData["channels"][number][]>();
-  for (const channel of channels) {
-    const slash = channel.path.indexOf("/");
-    const group = slash === -1 ? "" : channel.path.slice(0, slash);
-    groups.set(group, [...(groups.get(group) ?? []), channel]);
-  }
-  // Channels without a group come first, as the viewer lists them.
-  return [...groups.entries()].toSorted(([a], [b]) =>
-    a === "" || b === "" ? Number(a !== "") - Number(b !== "") : 0
-  );
-};
-
-export const BoardSide = (props: {
-  readonly data: BoardData;
-  readonly query: BoardQuery;
-}) => {
-  const { data, query } = props;
-  return (
-    <nav aria-label="Board" class="side__nav">
-      <SideItem
-        current={query.view === "activity"}
-        href={boardHref(query, {
-          channel: null,
-          thread: null,
-          view: "activity",
-        })}
-        label="Latest"
-        title="The newest threads and tasks of every channel"
-      />
-      <SideItem
-        count={data.open.total}
-        current={
-          query.view === "tasks" &&
-          query.channel === null &&
-          query.state !== "blocked"
-        }
-        href={boardHref(query, {
-          channel: null,
-          state: "open",
-          thread: null,
-          view: "tasks",
-        })}
-        label="All tasks"
-        title="All tasks by state. The number is the open tasks."
-      />
-      <SideItem
-        alert
-        count={data.open.blocked}
-        current={
-          query.view === "tasks" &&
-          query.channel === null &&
-          query.state === "blocked"
-        }
-        href={boardHref(query, {
-          channel: null,
-          state: "blocked",
-          thread: null,
-          view: "tasks",
-        })}
-        label="Needs a person"
-        title="Tasks that wait for an answer or a decision"
-      />
-      <span class="side__head label">Channels</span>
-      {data.channels.length === 0 ? (
-        <span class="hint small side__group-name">No channels yet.</span>
-      ) : null}
-      {channelGroups(data.channels).map(([group, channels]) => (
-        <div class="side__group" key={group}>
-          {group === "" ? null : <span class="side__group-name">{group}</span>}
-          {channels.map((channel) => (
-            <a
-              aria-current={query.channel === channel.path ? "page" : undefined}
-              class={
-                group === ""
-                  ? "side__item side__item--channel"
-                  : "side__item side__item--channel side__item--nested"
-              }
-              href={boardHref(query, {
-                channel: channel.path,
-                thread: null,
-                view: query.view === "tasks" ? "tasks" : "channel",
-              })}
-              key={channel.path}
-              title={`#${channel.path}${channel.open === 0 ? "" : ` · ${channel.open} open`}`}
-            >
-              <span class="truncate">{`#${group === "" ? channel.path : channel.path.slice(group.length + 1)}`}</span>
-              <span class="spacer" />
-              {channel.open === 0 ? null : (
-                <span class="side__count">{channel.open}</span>
-              )}
-            </a>
-          ))}
-        </div>
-      ))}
-    </nav>
-  );
-};
-
-/** The form of "+": a channel that exists before anything posts to it. */
-export const NewChannel = (props: {
-  readonly query: BoardQuery;
-  readonly run: Run;
-}) => {
-  const create = async (event: SubmitEvent) => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const channel = fieldOf(form, "path").toLowerCase();
-    if (await props.run(() => post("/channels", { path: channel }))) {
-      form.reset();
-      navigate(
-        boardHref(props.query, { channel, thread: null, view: "channel" })
-      );
-    }
-  };
-  return (
-    <details class="side__new">
-      <summary class="side__new-toggle">+ New channel</summary>
-      <form class="side__new-form" onSubmit={create}>
-        <input
-          aria-label="Channel path"
-          class="input mono composer__field"
-          name="path"
-          pattern={CHANNEL_PATH.source.slice(1, -1)}
-          placeholder="fix/web"
-          required
-        />
-        <span class="hint small">
-          Lowercase path. Prefix before / groups it.
-        </span>
-        <button class="button button--secondary button--small" type="submit">
-          Create channel
-        </button>
-      </form>
-    </details>
-  );
-};
-
-// The main view
-
-const ViewHead = (props: { readonly query: BoardQuery }) => {
-  const { query } = props;
-  let title = "Latest";
-  let sub: string | null =
-    "The newest threads and tasks of every channel, newest first.";
-  if (query.view === "channel") {
-    title = `#${query.channel ?? ""}`;
-    sub = null;
-  } else if (query.view === "tasks") {
-    title = query.channel === null ? "Tasks" : `#${query.channel}`;
-    sub = FILTER_HELP[query.state];
-  }
-  const canSwitchView = query.channel !== null && !query.channel.endsWith("/");
-  return (
-    <header class="view__head">
-      <h1 class="view__title">{title}</h1>
-      <span class="spacer" />
-      {canSwitchView ? (
-        <nav aria-label="Channel view" class="segmented">
-          <a
-            aria-current={query.view === "channel" ? "page" : undefined}
-            class="segmented__item"
-            href={boardHref(query, { thread: null, view: "channel" })}
-          >
-            Feed
-          </a>
-          <a
-            aria-current={query.view === "tasks" ? "page" : undefined}
-            class="segmented__item"
-            href={boardHref(query, {
-              state: "open",
-              thread: null,
-              view: "tasks",
-            })}
-          >
-            Tasks
-          </a>
-        </nav>
-      ) : null}
-      {query.view === "tasks" && query.channel !== null ? (
-        <a
-          class="button button--secondary button--small"
-          href={boardHref(query, { channel: null, thread: null })}
-        >
-          All channels
-        </a>
-      ) : null}
-      {sub === null ? null : <p class="view__sub">{sub}</p>}
-    </header>
-  );
-};
-
-const StateTabs = (props: {
-  readonly counts: BoardData["counts"];
-  readonly query: BoardQuery;
-}) => {
-  const { counts, query } = props;
-  const tab = (filter: TaskFilter) => (
-    <a
-      aria-current={query.state === filter ? "page" : undefined}
-      class={
-        filter === "blocked" && (counts.blocked ?? 0) > 0
-          ? "tabs__item tabs__item--alert"
-          : "tabs__item"
-      }
-      href={boardHref(query, { state: filter, thread: null })}
-      key={filter}
-      title={FILTER_HELP[filter]}
-    >
-      {FILTER_LABEL[filter]}
-      {counts[filter] === undefined ? null : (
-        <span class="tabs__count">{counts[filter]}</span>
-      )}
-    </a>
-  );
-  return (
-    <nav aria-label="Task states" class="tabs">
-      {TASK_FILTERS.filter((filter) => ACTIVE_FILTERS.has(filter)).map(tab)}
-      <span aria-hidden="true" class="tabs__sep" />
-      {TASK_FILTERS.filter((filter) => !ACTIVE_FILTERS.has(filter)).map(tab)}
-    </nav>
-  );
-};
-
-export const Labels = (props: {
-  readonly labels: Readonly<Record<string, string>>;
-  readonly max?: number;
-}) => {
-  const labels = visibleLabels(props.labels);
-  const shown = labels.slice(0, props.max ?? labels.length);
-  return shown.length === 0 ? null : (
-    <span class="labels">
-      {shown.map(([key, value]) => (
-        <span class="tag" key={key}>{`${key}=${value}`}</span>
-      ))}
-      {labels.length > shown.length ? <span class="muted">…</span> : null}
-    </span>
-  );
-};
-
-/** The second line of a task: who holds it, what it waits for, how it ended. */
-const TaskDetail = (props: {
-  readonly now: number;
-  readonly root: MessageView;
-}) => {
-  const { task } = props.root;
-  if (task === undefined) {
-    return null;
-  }
-  const state = stateNow(task, props.now);
-  const text = (() => {
-    switch (state) {
-      case "claimed":
-        return task.claim === null
-          ? ""
-          : `${actorName(task.claim.actor)} · claim ends in ${timeLeft(task.claim.until, props.now)}`;
-      case "blocked":
-        return task.blocked === null
-          ? "Reply to continue."
-          : `${task.blocked.kind ?? "held"}: ${task.blocked.reason}`;
-      case "waiting":
-        return `starts after ${task.needs.map((need) => `#${need}`).join(" ")}`;
-      case "completed":
-        return task.result ?? "";
-      case "failed":
-      case "canceled":
-        return task.reason ?? state;
-      default:
-        return task.for === null ? "for anyone" : `for ${actorName(task.for)}`;
-    }
-  })();
-  return <span class={`row__detail row__detail--${state}`}>{text}</span>;
-};
-
-const TaskRow = (props: {
-  readonly now: number;
-  readonly query: BoardQuery;
-  readonly summary: ThreadSummaryView;
-}) => {
-  const { now, query, summary } = props;
-  const root = summary.message;
-  const state = root.task === undefined ? null : stateNow(root.task, now);
-  const open = query.thread === root.id;
-  return (
-    <article class={open ? "row-item row-item--open" : "row-item"}>
-      <span
-        aria-hidden="true"
-        class={
-          state === null
-            ? "muted row-item__mark"
-            : `row-item__mark task-state--${state}`
-        }
-        title={state === null ? "Thread" : `${STATE_LABEL[state]} (${state})`}
-      >
-        {state === null ? "·" : STATE_MARK[state]}
-      </span>
-      <div class="row-item__main">
-        <div class="row-item__top">
-          <a
-            aria-current={open ? "true" : undefined}
-            class="row-item__title"
-            href={boardHref(query, { thread: root.id })}
-          >
-            <span class="muted mono">{`#${root.id}`}</span>
-            {` ${titleOf(root.text)}`}
-          </a>
-          <span class="row-item__aside">
-            {query.channel === root.channel ? null : (
-              <span class="mono row-item__channel">{`#${root.channel}`}</span>
-            )}
-            <span class="row-item__age">
-              {formatAge(now - lastActive(summary))}
-            </span>
-          </span>
-        </div>
-        <div class="row-item__meta">
-          {state === null ? (
-            <span class="task-state">thread</span>
-          ) : (
-            <span
-              class={`task-state task-state--${state}`}
-              title={`Board state: ${state}`}
-            >
-              {STATE_LABEL[state]}
-            </span>
-          )}
-          <TaskDetail now={now} root={root} />
-          <Labels labels={root.labels} max={3} />
-        </div>
-      </div>
-    </article>
-  );
-};
-
-/** A thread in the activity or a channel: title, metadata, preview, and latest reply. */
-const ThreadItem = (props: {
-  readonly now: number;
-  readonly query: BoardQuery;
-  readonly summary: ThreadSummaryView;
-}) => {
-  const { now, query, summary } = props;
-  const root = summary.message;
-  const { last, replies } = summary;
-  const body = bodyOf(root.text);
-  const state = root.task === undefined ? null : stateNow(root.task, now);
-  const open = query.thread === root.id;
-  return (
-    <article class={open ? "feed-item feed-item--open" : "feed-item"}>
-      <div class="feed-item__top">
-        {state === null ? null : (
-          <span
-            aria-hidden="true"
-            class={`task-state--${state} mono`}
-            title={`${STATE_LABEL[state]} (${state})`}
-          >
-            {STATE_MARK[state]}
-          </span>
-        )}
-        <a
-          aria-current={open ? "true" : undefined}
-          class="feed-item__title"
-          href={boardHref(query, { thread: root.id })}
-        >
-          <span class="muted mono">{`#${root.id}`}</span>
-          {` ${titleOf(root.text)}`}
-        </a>
-        <span class="row-item__aside">
-          {query.channel === root.channel ? null : (
-            <a
-              class="mono row-item__channel"
-              href={boardHref(query, {
-                channel: root.channel,
-                thread: null,
-                view: "channel",
-              })}
-            >{`#${root.channel}`}</a>
-          )}
-          <span class="row-item__age">
-            {formatAgo(Date.parse(root.createdAt), now)}
-          </span>
-        </span>
-      </div>
-      <div class="feed-item__meta">
-        <strong>{actorName(root.by.actor)}</strong>
-        {state === null ? null : (
-          <span
-            class={`task-state task-state--${state}`}
-            title={`Board state: ${state}`}
-          >
-            {STATE_LABEL[state]}
-          </span>
-        )}
-        <TaskDetail now={now} root={root} />
-        <Labels labels={root.labels} max={3} />
-      </div>
-      {body === "" ? null : <p class="feed-item__body">{body}</p>}
-      {last === null ? null : (
-        <div class="feed-item__reply">
-          <strong>{actorName(last.by.actor)}</strong>
-          <span class="feed-item__reply-text">
-            {last.deleted ? "(deleted)" : last.text.replaceAll(SPACES, " ")}
-          </span>
-          <span class="muted nowrap">
-            {`${replies > 1 ? `${replies} replies · ` : ""}${formatAgo(Date.parse(last.createdAt), now)}`}
-          </span>
-        </div>
-      )}
-    </article>
-  );
-};
-
-const EMPTY: Record<BoardView, string> = {
-  activity: "Nothing on the board yet. Create a channel, then a task below.",
-  channel: "Nothing in this channel yet. Create a task below.",
-  tasks: "No tasks in this list.",
-};
-
-export const BoardMain = (props: {
-  readonly data: BoardData;
-  readonly now: number;
-  readonly query: BoardQuery;
-}) => {
-  const { data, now, query } = props;
-  const tasks = query.view === "tasks";
-  return (
-    <div class="view__live">
-      <ViewHead query={query} />
-      {tasks ? <StateTabs counts={data.counts} query={query} /> : null}
-      <div class="view__list">
-        {data.threads.length === 0 ? (
-          <p class="hint view__empty">{EMPTY[query.view]}</p>
-        ) : (
-          // The board gives the threads newest last; people read the newest first.
-          (tasks ? data.threads : data.threads.toReversed()).map((summary) =>
-            tasks ? (
-              <TaskRow
-                key={summary.message.id}
-                now={now}
-                query={query}
-                summary={summary}
-              />
-            ) : (
-              <ThreadItem
-                key={summary.message.id}
-                now={now}
-                query={query}
-                summary={summary}
-              />
-            )
-          )
-        )}
-      </div>
-    </div>
-  );
+/** The trimmed value of a form field. */
+export const fieldOf = (form: HTMLFormElement, name: string) => {
+  const value = new FormData(form).get(name);
+  return typeof value === "string" ? value.trim() : "";
 };
 
 /** Enter sends the form of a composer; Shift+Enter makes a new line. */
@@ -640,123 +165,716 @@ export const sendOnEnter = (event: KeyboardEvent) => {
   }
 };
 
-/** The composer below the main view creates a task in a channel, with labels and the tasks it starts after. */
-export const Composer = (props: {
+// The sidebar
+
+const SideItem = (props: {
+  readonly alert?: boolean;
+  readonly children: ComponentChildren;
+  readonly count?: number | undefined;
+  readonly current: boolean;
+  readonly href: string;
+  readonly title: string;
+}) => (
+  <a
+    aria-current={props.current ? "page" : undefined}
+    class="side__item"
+    href={props.href}
+    title={props.title}
+  >
+    <span class="truncate">{props.children}</span>
+    <span class="spacer" />
+    {props.count === undefined || props.count === 0 ? null : (
+      <span
+        class={
+          props.alert === true
+            ? "side__count side__count--alert"
+            : "side__count"
+        }
+      >
+        {props.count}
+      </span>
+    )}
+  </a>
+);
+
+/** The channels by the first part of their path: `fix/web` is `#web` under `fix`. */
+const channelGroups = (channels: readonly Channel[]) => {
+  const groups = new Map<string, Channel[]>();
+  for (const channel of channels) {
+    const slash = channel.path.indexOf("/");
+    const group = slash === -1 ? "" : channel.path.slice(0, slash);
+    groups.set(group, [...(groups.get(group) ?? []), channel]);
+  }
+  // Channels without a group come first, as the viewer lists them.
+  return [...groups.entries()].toSorted(([a], [b]) =>
+    a === "" || b === "" ? Number(a !== "") - Number(b !== "") : 0
+  );
+};
+
+/** The form of "+": a channel that exists before anything posts to it. */
+const NewChannel = (props: {
+  readonly onDone: () => void;
+  readonly query: BoardQuery;
+  readonly run: Run;
+}) => {
+  const create = async (event: SubmitEvent) => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const channel = fieldOf(form, "path").toLowerCase();
+    if (await props.run(() => post("/channels", { path: channel }))) {
+      props.onDone();
+      navigate(
+        boardHref(props.query, { channel, thread: null, view: "channel" })
+      );
+    }
+  };
+  const cancel = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      props.onDone();
+    }
+  };
+  return (
+    <form class="side__new" onSubmit={create}>
+      <input
+        aria-label="Channel path"
+        autoFocus
+        class="input mono"
+        name="path"
+        onKeyDown={cancel}
+        pattern={CHANNEL_PATH.source.slice(1, -1)}
+        placeholder="fix/web"
+        required
+        title="Lowercase parts with / between them. The part before / groups the channel."
+      />
+    </form>
+  );
+};
+
+export const BoardSide = (props: {
+  readonly data: BoardData;
+  readonly query: BoardQuery;
+  readonly run: Run;
+  readonly user: string;
+}) => {
+  const { data, query } = props;
+  const [adding, setAdding] = useState(false);
+  const toggle = () => setAdding((value) => !value);
+  const done = () => setAdding(false);
+  const blocked = data.open.filter(
+    (root) => root.task?.state === "blocked"
+  ).length;
+  return (
+    <aside class="board__side">
+      <nav aria-label="Board" class="side__scroll">
+        <SideItem
+          current={query.view === "activity"}
+          href={boardHref(query, {
+            channel: null,
+            thread: null,
+            view: "activity",
+          })}
+          title="The newest messages of every channel"
+        >
+          Latest
+        </SideItem>
+        <SideItem
+          count={data.open.length}
+          current={
+            query.view === "tasks" &&
+            query.channel === null &&
+            query.state !== "blocked"
+          }
+          href={boardHref(query, {
+            channel: null,
+            state: "open",
+            thread: null,
+            view: "tasks",
+          })}
+          title="All tasks by state. The number is the open tasks."
+        >
+          Tasks
+        </SideItem>
+        <SideItem
+          alert
+          count={blocked}
+          current={
+            query.view === "tasks" &&
+            query.channel === null &&
+            query.state === "blocked"
+          }
+          href={boardHref(query, {
+            channel: null,
+            state: "blocked",
+            thread: null,
+            view: "tasks",
+          })}
+          title="Tasks that wait for an answer or a decision"
+        >
+          Needs a person
+        </SideItem>
+        <div class="side__head">
+          <span class="label">Channels</span>
+          <span class="spacer" />
+          <button
+            aria-expanded={adding}
+            class="side__tool"
+            onClick={toggle}
+            title="New channel"
+            type="button"
+          >
+            +
+          </button>
+        </div>
+        {adding ? (
+          <NewChannel onDone={done} query={query} run={props.run} />
+        ) : null}
+        {data.channels.length === 0 && !adding ? (
+          <p class="side__empty">No channels yet. Make one with +.</p>
+        ) : null}
+        {channelGroups(data.channels).map(([group, channels]) => (
+          <div class="side__group" key={group}>
+            {group === "" ? null : (
+              <span class="side__group-name">{group}</span>
+            )}
+            {channels.map((channel) => (
+              <SideItem
+                count={channel.open === 0 ? channel.threads : channel.open}
+                current={query.channel === channel.path}
+                href={boardHref(query, {
+                  channel: channel.path,
+                  thread: null,
+                  view: query.view === "tasks" ? "tasks" : "channel",
+                })}
+                key={channel.path}
+                title={`#${channel.path}${channel.open === 0 ? "" : ` · ${channel.open} open tasks`}`}
+              >
+                {`#${group === "" ? channel.path : channel.path.slice(group.length + 1)}`}
+              </SideItem>
+            ))}
+          </div>
+        ))}
+      </nav>
+      <div class="side__foot">
+        <Avatar name={props.user} small />
+        <span class="truncate">{`as ${props.user}`}</span>
+      </div>
+    </aside>
+  );
+};
+
+// The main column
+
+/** The open tasks of the board in a line, each a link to its list: `2 working · 3 to do · 1 needs a person`. */
+const COUNTED: readonly TaskState[] = [
+  "claimed",
+  "ready",
+  "blocked",
+  "waiting",
+];
+
+const Counts = (props: {
+  readonly now: number;
+  readonly open: readonly MessageView[];
+  readonly query: BoardQuery;
+}) => {
+  const counts = countStates(props.open, props.now);
+  return (
+    <span class="counts">
+      {COUNTED.map((state) => (
+        <a
+          class={
+            state === "blocked" && (counts.blocked ?? 0) > 0
+              ? "counts__item counts__item--alert"
+              : "counts__item"
+          }
+          href={boardHref(props.query, {
+            channel: null,
+            state,
+            thread: null,
+            view: "tasks",
+          })}
+          key={state}
+          title={FILTER_HELP[state]}
+        >
+          <strong>{counts[state] ?? 0}</strong>
+          {` ${FILTER_LABEL[state]}`}
+        </a>
+      ))}
+    </span>
+  );
+};
+
+export type Connection = "connecting" | "live" | "retrying";
+
+const MainHead = (props: {
+  readonly connection: Connection;
+  readonly data: BoardData;
+  readonly now: number;
+  readonly query: BoardQuery;
+}) => {
+  const { query } = props;
+  let title = "Latest";
+  let meta = "the newest messages of every channel";
+  if (query.view === "channel") {
+    title = `#${query.channel ?? ""}`;
+    meta = "threads by latest activity";
+  } else if (query.view === "tasks") {
+    title = query.channel === null ? "Tasks" : `#${query.channel}`;
+    meta = FILTER_HELP[query.state];
+  }
+  const canSwitch = query.channel !== null && !query.channel.endsWith("/");
+  return (
+    <header class="col-head">
+      <h1 class="col-head__title">{title}</h1>
+      <span class="col-head__meta truncate">{meta}</span>
+      <span class="spacer" />
+      {canSwitch ? (
+        <nav aria-label="Channel view" class="switch">
+          <a
+            aria-current={query.view === "channel" ? "page" : undefined}
+            href={boardHref(query, { thread: null, view: "channel" })}
+          >
+            Threads
+          </a>
+          <a
+            aria-current={query.view === "tasks" ? "page" : undefined}
+            href={boardHref(query, {
+              state: "open",
+              thread: null,
+              view: "tasks",
+            })}
+          >
+            Tasks
+          </a>
+        </nav>
+      ) : null}
+      <Counts now={props.now} open={props.data.open} query={query} />
+      <span
+        class={`live live--${props.connection}`}
+        title="Board events come in as they happen"
+      >
+        {props.connection}
+      </span>
+    </header>
+  );
+};
+
+/** A scrolling feed that keeps to the bottom while you are there, and holds still while you read. */
+const Feed = (props: {
+  readonly children: ComponentChildren;
+  /** The newest item: when it changes, something new came in below. */
+  readonly last: string;
+  /** The view: when it changes, the feed goes to the bottom. */
+  readonly scope: string;
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const seen = useRef(props.last);
+  const [behind, setBehind] = useState(false);
+  const toBottom = () => {
+    const element = ref.current;
+    if (element !== null) {
+      element.scrollTop = element.scrollHeight;
+    }
+    pinned.current = true;
+    setBehind(false);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new scope starts at the bottom.
+  useLayoutEffect(toBottom, [props.scope]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new last item moves the feed.
+  useLayoutEffect(() => {
+    if (pinned.current) {
+      toBottom();
+    } else if (props.last !== seen.current) {
+      setBehind(true);
+    }
+    seen.current = props.last;
+  }, [props.last]);
+  const scrolled = () => {
+    const element = ref.current;
+    if (element !== null) {
+      pinned.current =
+        element.scrollHeight - element.scrollTop - element.clientHeight <
+        BOTTOM_SLACK_PX;
+      if (pinned.current) {
+        setBehind(false);
+      }
+    }
+  };
+  return (
+    <div class="feed-wrap">
+      <div class="feed" onScroll={scrolled} ref={ref}>
+        {props.children}
+      </div>
+      {behind ? (
+        <button class="feed__jump" onClick={toBottom} type="button">
+          new messages ↓
+        </button>
+      ) : null}
+    </div>
+  );
+};
+
+const Where = (props: {
+  readonly message: MessageView;
+  readonly query: BoardQuery;
+}) => (
+  <span class="message__where">
+    {props.message.re === null ? "in " : "replied in "}
+    <a
+      class="message__channel"
+      href={boardHref(props.query, {
+        channel: props.message.channel,
+        thread: null,
+        view: "channel",
+      })}
+    >{`#${props.message.channel}`}</a>
+  </span>
+);
+
+const ActivityFeed = (props: {
+  readonly messages: readonly MessageView[];
+  readonly now: number;
+  readonly query: BoardQuery;
+}) => {
+  const { now, query } = props;
+  const item = (message: MessageView, continued: boolean) => {
+    const thread = message.re ?? message.id;
+    return (
+      <Message
+        context={<Where message={message} query={query} />}
+        continued={continued}
+        href={boardHref(query, { thread })}
+        key={message.id}
+        message={message}
+        now={now}
+        open={query.thread === thread}
+        query={query}
+      />
+    );
+  };
+  return (
+    <Feed
+      last={props.messages.at(-1)?.id ?? ""}
+      scope={boardHref(query, { thread: null })}
+    >
+      {props.messages.length === 0 ? (
+        <p class="empty">
+          Nothing on the board yet. Make a channel, then start a thread below.
+        </p>
+      ) : (
+        <Timeline item={item} messages={props.messages} now={now} />
+      )}
+    </Feed>
+  );
+};
+
+const ChannelFeed = (props: {
+  readonly now: number;
+  readonly query: BoardQuery;
+  readonly threads: readonly ThreadSummaryView[];
+}) => {
+  const { now, query } = props;
+  const summaries = new Map(
+    props.threads.map((summary) => [summary.message.id, summary])
+  );
+  const item = (message: MessageView, continued: boolean) => {
+    const summary = summaries.get(message.id);
+    return (
+      <Message
+        continued={continued}
+        href={boardHref(query, { thread: message.id })}
+        key={message.id}
+        message={message}
+        now={now}
+        open={query.thread === message.id}
+        query={query}
+        replies={{
+          count: summary?.replies ?? 0,
+          last: summary?.last ?? null,
+        }}
+      />
+    );
+  };
+  // The board lists threads by latest activity, newest last: so does the feed.
+  return (
+    <Feed
+      last={props.threads.at(-1)?.message.id ?? ""}
+      scope={boardHref(query, { thread: null })}
+    >
+      {props.threads.length === 0 ? (
+        <p class="empty">Nothing in this channel yet. Start a thread below.</p>
+      ) : (
+        <Timeline
+          item={item}
+          messages={props.threads.map((summary) => summary.message)}
+          now={now}
+        />
+      )}
+    </Feed>
+  );
+};
+
+const StateTabs = (props: {
+  readonly now: number;
+  readonly open: readonly MessageView[];
+  readonly query: BoardQuery;
+}) => {
+  const { query } = props;
+  const counts: Partial<Record<TaskFilter, number>> = countStates(
+    props.open.filter((root) => inFilter(root.channel, query.channel)),
+    props.now
+  );
+  counts.open = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  const tab = (filter: TaskFilter) => (
+    <a
+      aria-current={query.state === filter ? "page" : undefined}
+      class={
+        filter === "blocked" && (counts.blocked ?? 0) > 0
+          ? "tabs__item tabs__item--alert"
+          : "tabs__item"
+      }
+      href={boardHref(query, { state: filter, thread: null })}
+      key={filter}
+      title={FILTER_HELP[filter]}
+    >
+      {FILTER_LABEL[filter]}
+      {counts[filter] === undefined || counts[filter] === 0 ? null : (
+        <span class="tabs__count">{counts[filter]}</span>
+      )}
+    </a>
+  );
+  return (
+    <nav aria-label="Task states" class="tabs">
+      {TASK_FILTERS.filter((filter) => ACTIVE_FILTERS.has(filter)).map(tab)}
+      <span aria-hidden="true" class="tabs__sep" />
+      {TASK_FILTERS.filter((filter) => !ACTIVE_FILTERS.has(filter)).map(tab)}
+    </nav>
+  );
+};
+
+/** The one thing about a task that matters now: who holds it, what it waits for, how it ended. */
+const taskNow = (root: MessageView, now: number) => {
+  const { task } = root;
+  if (task === undefined) {
+    return "";
+  }
+  switch (stateNow(task, now)) {
+    case "claimed":
+      return task.claim === null ? "" : `by ${actorName(task.claim.actor)}`;
+    case "blocked":
+      return task.blocked?.reason ?? "";
+    case "waiting":
+      return `needs ${task.needs.map((id) => `#${id}`).join(" ")}`;
+    case "completed":
+      return task.result ?? "";
+    case "failed":
+    case "canceled":
+      return task.reason ?? "";
+    default:
+      return task.for === null ? "" : `for ${actorName(task.for)}`;
+  }
+};
+
+const TaskRow = (props: {
+  readonly now: number;
+  readonly query: BoardQuery;
+  readonly summary: ThreadSummaryView;
+}) => {
+  const { now, query } = props;
+  const root = props.summary.message;
+  const state = root.task === undefined ? null : stateNow(root.task, now);
+  return (
+    <a
+      aria-current={query.thread === root.id ? "true" : undefined}
+      class="task-row"
+      href={boardHref(query, { thread: root.id })}
+    >
+      <span class="task-row__state">
+        {state === null ? null : <StateMark state={state} />}
+      </span>
+      <span class="task-row__title">
+        <span class="muted mono">{`#${root.id}`}</span>
+        <span class="truncate">{titleOf(root.text)}</span>
+        {visibleLabels(root.labels).length > 0 ? (
+          <Labels labels={root.labels} />
+        ) : null}
+      </span>
+      <span class="task-row__now truncate">{taskNow(root, now)}</span>
+      <span class="task-row__where truncate">{`#${root.channel}`}</span>
+      <span class="task-row__age">
+        {shortAge(lastActive(props.summary), now)}
+      </span>
+    </a>
+  );
+};
+
+const TaskGrid = (props: {
+  readonly now: number;
+  readonly open: readonly MessageView[];
+  readonly query: BoardQuery;
+  readonly tasks: readonly ThreadSummaryView[];
+}) => (
+  <>
+    <StateTabs now={props.now} open={props.open} query={props.query} />
+    <div class="grid-wrap">
+      {props.tasks.length === 0 ? (
+        <p class="empty">No tasks in this list.</p>
+      ) : (
+        props.tasks.map((summary) => (
+          <TaskRow
+            key={summary.message.id}
+            now={props.now}
+            query={props.query}
+            summary={summary}
+          />
+        ))
+      )}
+    </div>
+  </>
+);
+
+/** The composer below a feed starts a thread, or a task with labels and the tasks it waits for. */
+const Composer = (props: {
   readonly data: BoardData;
   readonly query: BoardQuery;
   readonly run: Run;
 }) => {
   const { data, query } = props;
+  const [task, setTask] = useState(true);
+  const toggleTask = () => setTask((value) => !value);
+  const fixed = query.view === "channel" ? query.channel : null;
   const paths = data.channels.map((channel) => channel.path);
-  const exact =
-    query.channel !== null && !query.channel.endsWith("/")
-      ? query.channel
-      : null;
-  const fixed = query.view === "channel" ? exact : null;
-  const inSubtree = paths.filter((path) => inFilter(path, query.channel));
-  const options = inSubtree.length === 0 ? paths : inSubtree;
   const create = async (event: SubmitEvent) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
+    const body = {
+      channel: fixed ?? fieldOf(form, "channel"),
+      labels: parseLabels(fieldOf(form, "labels")),
+      text: fieldOf(form, "text"),
+    };
     let id = "";
-    const created = await props.run(async () => {
-      ({
-        task: { id },
-      } = await post<{ task: { id: string } }>("/tasks", {
-        channel: fixed ?? fieldOf(form, "channel"),
-        labels: parseLabels(fieldOf(form, "labels")),
-        needs: parseNeeds(fieldOf(form, "needs")),
-        text: fieldOf(form, "text"),
-      }));
+    const sent = await props.run(async () => {
+      if (task) {
+        ({
+          task: { id },
+        } = await post<{ task: { id: string } }>("/tasks", {
+          ...body,
+          needs: parseNeeds(fieldOf(form, "needs")),
+        }));
+      } else {
+        ({
+          message: { id },
+        } = await post<{ message: { id: string } }>("/messages", body));
+      }
     });
-    if (created) {
+    if (sent) {
       form.reset();
       navigate(boardHref(query, { thread: id }));
     }
   };
   return (
-    <form class="composer" key={fixed ?? exact ?? ""} onSubmit={create}>
-      <div class="composer__box">
-        <textarea
-          aria-label="Task"
-          class="textarea composer__text"
-          name="text"
-          onKeyDown={sendOnEnter}
-          placeholder={
-            fixed === null
-              ? "New task… First line is the title (Shift+Enter for new line)."
-              : `New task in #${fixed}… First line is the title.`
-          }
+    <form class="compose" key={fixed ?? ""} onSubmit={create}>
+      {fixed === null ? (
+        <select
+          aria-label="Channel"
+          class="compose__channel mono"
+          defaultValue=""
+          name="channel"
           required
-        />
-        <div class="composer__bar">
-          {fixed === null ? (
-            <select
-              aria-label="Channel"
-              class="select mono composer__select"
-              defaultValue={exact ?? ""}
-              name="channel"
-              required
-            >
-              <option disabled value="">
-                {paths.length === 0 ? "Create a channel first" : "Channel…"}
-              </option>
-              {options.map((path) => (
-                <option key={path} value={path}>{`#${path}`}</option>
-              ))}
-            </select>
-          ) : (
-            <span class="mono muted small">{`#${fixed}`}</span>
-          )}
-          <span class="spacer" />
-          <button
-            class="button button--primary button--small"
-            title="Enter creates the task. Shift+Enter makes a new line."
-            type="submit"
-          >
-            Create task
-          </button>
-          <details class="composer__more">
-            <summary class="composer__more-toggle">
-              + Labels &amp; dependencies
-            </summary>
-            <div class="composer__more-fields">
-              <input
-                aria-label="Labels"
-                autoComplete="off"
-                class="input mono composer__field"
-                list="composer-labels"
-                name="labels"
-                placeholder="Labels: kind=code"
-                title="Optional. Facts about the task as key=value, separated by commas."
-              />
-              <datalist id="composer-labels">
-                {data.suggest.labels.map((value) => (
-                  <option key={value} value={value} />
-                ))}
-              </datalist>
-              <input
-                aria-label="Starts after"
-                autoComplete="off"
-                class="input mono composer__field"
-                list="composer-tasks"
-                name="needs"
-                placeholder="Starts after: #12"
-                title="Optional. Open task numbers that must finish before this task starts."
-              />
-              <datalist id="composer-tasks">
-                {data.suggest.tasks.map((task) => (
-                  <option
-                    key={task.id}
-                    label={task.title}
-                    value={`#${task.id}`}
-                  />
-                ))}
-              </datalist>
-            </div>
-          </details>
+        >
+          <option disabled value="">
+            {paths.length === 0 ? "make a channel first" : "# channel"}
+          </option>
+          {paths.map((path) => (
+            <option key={path} value={path}>{`#${path}`}</option>
+          ))}
+        </select>
+      ) : null}
+      <textarea
+        aria-label={task ? "New task" : "New thread"}
+        class="compose__text"
+        name="text"
+        onKeyDown={sendOnEnter}
+        placeholder={
+          task
+            ? `new task${fixed === null ? "" : ` in #${fixed}`}… the first line is its title`
+            : `start a thread${fixed === null ? "" : ` in #${fixed}`}…`
+        }
+        required
+      />
+      {task ? (
+        <div class="compose__fields">
+          <input
+            aria-label="Labels"
+            autoComplete="off"
+            class="input mono"
+            name="labels"
+            placeholder="labels: kind=code, team=web"
+          />
+          <input
+            aria-label="Starts after"
+            autoComplete="off"
+            class="input mono"
+            name="needs"
+            placeholder="starts after: #12 #14"
+          />
         </div>
+      ) : null}
+      <div class="compose__bar">
+        <label class="compose__toggle">
+          <input checked={task} onChange={toggleTask} type="checkbox" />
+          make it a task
+        </label>
+        <span class="spacer" />
+        <span class="compose__hint">
+          enter to send · shift+enter for a new line
+        </span>
+        <button class="button button--primary button--small" type="submit">
+          Send
+        </button>
       </div>
     </form>
+  );
+};
+
+export const BoardMain = (props: {
+  readonly connection: Connection;
+  readonly data: BoardData;
+  readonly now: number;
+  readonly query: BoardQuery;
+  readonly run: Run;
+}) => {
+  const { data, now, query } = props;
+  const { listing } = data;
+  let body: ComponentChildren;
+  if (listing.kind === "tasks") {
+    body = (
+      <TaskGrid
+        now={now}
+        open={data.open}
+        query={query}
+        tasks={listing.tasks}
+      />
+    );
+  } else if (listing.kind === "threads") {
+    body = <ChannelFeed now={now} query={query} threads={listing.threads} />;
+  } else {
+    body = <ActivityFeed messages={listing.messages} now={now} query={query} />;
+  }
+  return (
+    <section class="board__main">
+      <MainHead
+        connection={props.connection}
+        data={data}
+        now={now}
+        query={query}
+      />
+      {body}
+      {listing.kind === "tasks" ? null : (
+        <Composer data={data} query={query} run={props.run} />
+      )}
+    </section>
   );
 };

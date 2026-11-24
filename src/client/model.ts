@@ -99,25 +99,6 @@ export const titleOf = (text: string) => {
   return line.trim().replace(HEADING, "") || "(no text)";
 };
 
-/** The text after the title as one paragraph, for a short look at a message. */
-export const bodyOf = (text: string) =>
-  text
-    .split("\n")
-    .map((part) => part.trim())
-    .filter((part) => part !== "")
-    .slice(1)
-    .join(" ");
-
-/** The text after the title line, which the pane shows as its heading. */
-export const withoutTitle = (text: string) => {
-  const lines = text.split("\n");
-  const title = lines.findIndex((line) => line.trim() !== "");
-  return lines
-    .slice(title + 1)
-    .join("\n")
-    .trim();
-};
-
 /** Who wrote a message or holds a task, for people. */
 export const actorName = (actor: string | null | undefined) => {
   if (actor === null || actor === undefined) {
@@ -227,30 +208,67 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-export const formatAgo = (time: number, now: number) => {
-  const delta = now - time;
-  if (delta < MINUTE) {
-    return "just now";
+/** The first letter of a name, for its square avatar. */
+export const initialOf = (name: string) =>
+  (name.trim()[0] ?? "?").toUpperCase();
+
+const dayKey = (time: number) => new Date(time).toDateString();
+
+/** The divider of a day in a feed: `today`, `yesterday`, or the date. */
+export const dayLabel = (time: number, now: number) => {
+  if (dayKey(time) === dayKey(now)) {
+    return "today";
   }
-  if (delta < HOUR) {
-    return `${Math.floor(delta / MINUTE)} min ago`;
+  if (dayKey(time) === dayKey(now - DAY)) {
+    return "yesterday";
   }
-  if (delta < DAY) {
-    return `${Math.floor(delta / HOUR)} h ago`;
-  }
-  return new Date(time).toISOString().slice(0, 10);
+  return new Date(time).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    weekday: "long",
+  });
 };
 
-export const formatAge = (ms: number) => {
-  const days = Math.floor(ms / DAY);
-  const hours = Math.floor((ms % DAY) / HOUR);
-  if (days > 0) {
-    return `${days}d ${hours}h`;
+export const sameDay = (a: number, b: number) => dayKey(a) === dayKey(b);
+
+/** A short age: `now`, `4m`, `3h`, `2d`. */
+export const shortAge = (time: number, now: number) => {
+  const delta = Math.max(0, now - time);
+  if (delta < MINUTE) {
+    return "now";
   }
-  if (hours > 0) {
-    return `${hours}h`;
+  if (delta < HOUR) {
+    return `${Math.floor(delta / MINUTE)}m`;
   }
-  return ms < MINUTE
-    ? `${Math.max(0, Math.floor(ms / 1000))}s`
-    : `${Math.floor(ms / MINUTE)}m`;
+  if (delta < DAY) {
+    return `${Math.floor(delta / HOUR)}h`;
+  }
+  return `${Math.floor(delta / DAY)}d`;
+};
+
+/** Messages from one author in a row, a few minutes apart, show as one block. */
+const CONTINUED_MS = 5 * MINUTE;
+
+export const continues = (
+  previous: MessageView | undefined,
+  message: MessageView
+) =>
+  previous !== undefined &&
+  previous.by.actor === message.by.actor &&
+  previous.channel === message.channel &&
+  previous.task === undefined &&
+  message.task === undefined &&
+  sameDay(Date.parse(previous.createdAt), Date.parse(message.createdAt)) &&
+  Date.parse(message.createdAt) - Date.parse(previous.createdAt) < CONTINUED_MS;
+
+/** The open tasks by state, for the counts of the header and the tabs. */
+export const countStates = (roots: readonly MessageView[], now: number) => {
+  const counts: Partial<Record<TaskState, number>> = {};
+  for (const root of roots) {
+    if (root.task !== undefined) {
+      const state = stateNow(root.task, now);
+      counts[state] = (counts[state] ?? 0) + 1;
+    }
+  }
+  return counts;
 };

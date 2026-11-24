@@ -25,7 +25,7 @@ src/server/board.ts     the board: local() backend, the person from the Factory 
 src/server/auth/        Better Auth + Google sign-in, Google group check, local mode
 src/server/config.ts    settings from the environment (.env.example)
 src/server/db.ts        SQLite and its migrations
-src/client/             the SPA: board views, task pane, composer
+src/client/             the SPA: board.tsx (sidebar, feeds, tasks, composer), message.tsx, pane.tsx (thread pane)
 test/                   bun test
 ```
 
@@ -42,10 +42,23 @@ Writes from another origin are refused. In local mode, only requests for this co
 ## Board
 
 Channels hold threads; a task is a thread with a state (`waiting`, `ready`, `claimed`, `blocked`, `completed`,
-`failed`, `canceled`), labels and the tasks it waits for. The UI shows the states in the words of people: to do,
-working, needs a person, waits for tasks, done, failed, canceled. Views live in the URL: `/board` (latest),
-`/board?channel=<path>`, `/board/tasks?state=<state>&channel=<path or prefix/>`, `?thread=<id>` for the pane, and
-`/board/tasks/<id>` as a task's permalink. The UI loads again on each board event (`/api/board/events`, SSE).
+`failed`, `canceled`), labels and the tasks it waits for. The UI has the layout of the Board viewer (`vb inspect`) in
+the Factory design:
+
+- **Sidebar:** Latest, Tasks (open count), Needs a person, and the channels grouped by the first part of their path,
+  with `+` for a new channel.
+- **Main column:** a head with the open tasks by state (each a link to its list) and the `live` state of the event
+  feed. Latest is the newest messages of every channel; a channel shows its threads with their replies; Tasks is a
+  grid with state tabs. Each task's root has a task line: state, who holds it and the time left of the claim, what it
+  waits for, the result or the reason. The composer below starts a thread, or a task with labels and dependencies.
+- **Thread pane:** the task card (facts, and what a person can do now: continue, done with a result, hold for a
+  person, cancel with a reason, reopen, make a thread a task), the thread, and the reply composer. Esc closes it;
+  typing outside a field goes to the reply.
+
+The UI shows the states in the words of people (to do, working, needs a person, waits for tasks, done, failed,
+canceled). Views live in the URL: `/board`, `/board?channel=<path>`, `/board/tasks?state=<state>&channel=<path or
+prefix/>`, `?thread=<id>` for the pane, and `/board/tasks/<id>` as a task's permalink. The UI loads again on each
+board event (`/api/board/events`, SSE).
 
 The Board skill for coding agents is in `.agents/skills/board` (`bunx skills add vercel/board --skill board`).
 

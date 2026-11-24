@@ -3,28 +3,34 @@ import {
   type BoardData,
   BoardMain,
   BoardSide,
-  Composer,
+  type Connection,
   loadBoard,
-  NewChannel,
   type Run,
 } from "./board.tsx";
 import { type BoardQuery, boardHref, boardQuery } from "./model.ts";
-import { loadThread, TaskPane, type ThreadData } from "./pane.tsx";
+import { loadThread, type ThreadData, ThreadPane } from "./pane.tsx";
 import { followLink, navigate, useUrl } from "./route.ts";
 
 const TICK_MS = 15_000;
 /** Board events come in bursts (a task and its reply): one reload for each burst. */
 const RELOAD_DELAY_MS = 150;
+const TOAST_MS = 8000;
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-/** A number that grows with each board event, so the views load again. */
-const useBoardVersion = () => {
+/**
+ * A number that grows with each board event, so the views load again, and the state of the feed's connection.
+ * EventSource reconnects by itself after a drop.
+ */
+const useBoardEvents = () => {
   const [version, setVersion] = useState(0);
+  const [connection, setConnection] = useState<Connection>("connecting");
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const events = new EventSource("/api/board/events");
+    events.addEventListener("open", () => setConnection("live"));
+    events.addEventListener("error", () => setConnection("retrying"));
     events.addEventListener("board", () => {
       clearTimeout(timer);
       timer = setTimeout(
@@ -37,7 +43,8 @@ const useBoardVersion = () => {
       events.close();
     };
   }, []);
-  return [version, () => setVersion((value) => value + 1)] as const;
+  const reload = useCallback(() => setVersion((value) => value + 1), []);
+  return { connection, reload, version };
 };
 
 const useNow = () => {
@@ -49,13 +56,45 @@ const useNow = () => {
   return now;
 };
 
+const isTyping = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName));
+
+/** Esc closes the thread pane; a key typed outside a field goes to the reply composer. */
+const useKeys = (query: BoardQuery) => {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (query.thread === null || event.defaultPrevented) {
+        return;
+      }
+      if (event.key === "Escape") {
+        navigate(boardHref(query, { thread: null }));
+        return;
+      }
+      const printable =
+        event.key.length === 1 &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey;
+      const reply = document.getElementById("reply");
+      if (printable && !isTyping(event.target) && reply !== null) {
+        reply.focus();
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, [query]);
+};
+
 const Board = (props: {
   readonly query: BoardQuery;
   readonly user: string;
 }) => {
   const { query } = props;
   const now = useNow();
-  const [version, reload] = useBoardVersion();
+  const { connection, reload, version } = useBoardEvents();
+  useKeys(query);
   const [data, setData] = useState<BoardData | null>(null);
   const [thread, setThread] = useState<ThreadData | null | undefined>(
     undefined
@@ -89,6 +128,15 @@ const Board = (props: {
     };
   }, [query.thread, version]);
 
+  useEffect(() => {
+    if (error === null) {
+      return;
+    }
+    const timer = setTimeout(() => setError(null), TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [error]);
+  const dismiss = () => setError(null);
+
   const run: Run = useCallback(
     async (write) => {
       setError(null);
@@ -107,42 +155,38 @@ const Board = (props: {
 
   const pane = query.thread !== null && thread !== undefined;
   return (
-    <>
+    <div class={pane ? "board board--pane" : "board"}>
+      {data === null ? (
+        <p class="empty">Loading…</p>
+      ) : (
+        <>
+          <BoardSide data={data} query={query} run={run} user={props.user} />
+          <BoardMain
+            connection={connection}
+            data={data}
+            now={now}
+            query={query}
+            run={run}
+          />
+        </>
+      )}
+      {pane ? (
+        <ThreadPane data={thread} now={now} query={query} run={run} />
+      ) : null}
       {error === null ? null : (
-        <div class="notice notice--bad" role="alert">
-          {error}
+        <div class="toast" role="alert">
+          <span>{error}</span>
+          <button
+            aria-label="Dismiss"
+            class="toast__close"
+            onClick={dismiss}
+            type="button"
+          >
+            ×
+          </button>
         </div>
       )}
-      <div class={pane ? "board-app board-app--pane" : "board-app"}>
-        <aside class="side">
-          <div class="side__scroll">
-            {data === null ? null : <BoardSide data={data} query={query} />}
-          </div>
-          <NewChannel query={query} run={run} />
-        </aside>
-        <section class="view">
-          {data === null ? (
-            <p class="hint view__empty">Loading…</p>
-          ) : (
-            <>
-              <BoardMain data={data} now={now} query={query} />
-              <Composer data={data} query={query} run={run} />
-            </>
-          )}
-        </section>
-        {pane ? (
-          <aside class="pane">
-            <TaskPane
-              data={thread}
-              now={now}
-              query={query}
-              run={run}
-              user={props.user}
-            />
-          </aside>
-        ) : null}
-      </div>
-    </>
+    </div>
   );
 };
 
@@ -284,8 +328,8 @@ export const App = () => {
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: the links inside handle the keys; this only routes their clicks.
     <div class="app" onClick={followLink}>
       <Header user={user} />
-      <main class="page page--compact">
-        <Board query={boardQuery(url)} user={user.email} />
+      <main class="board-shell">
+        <Board query={boardQuery(url)} user={user.name} />
       </main>
     </div>
   );
