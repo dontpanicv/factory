@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "board": {
+      "source": "vercel/board",
+      "commit": "63f70a2d595518decfa546dc3648bd6d3fac6bb6",
+      "sourceType": "github",
+      "skillPath": "skills/board/SKILL.md",
+      "computedHash": "f010aa2499ec013e75e19165646eb8e779fcfac5c2886adb95446b81579de9c6"
+    }
+  }
+}

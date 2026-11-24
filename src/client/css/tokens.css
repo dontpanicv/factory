@@ -1,0 +1,62 @@
+/* Factory design tokens. Source: the grep.ai visual language (square, mono chrome, purple accent). */
+
+:root {
+  --font-sans: "Schibsted Grotesk Variable", "Arial Narrow", Arial, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monospace;
+
+  --accent: #5147ef;
+  --accent-hover: #4538e0;
+  --accent-on-dark: #9a93ff;
+  --accent-wash: #5147ef14;
+
+  --ink: #0a0a0a;
+  --paper: #ffffff;
+  --canvas: #fcfcfd;
+  --muted: #6c727f;
+  --line: #0a0a0a24;
+  --line-strong: #0a0a0a80;
+  --dot: #d4d4d8;
+
+  --panel-dark: #101014;
+  --panel-dark-line: #33333b;
+  --panel-dark-ink: #f4f4f5;
+  --panel-dark-muted: #a2a2ab;
+  --card-dark: #111113;
+  --card-dark-line: #29292d;
+
+  --ok: #76c7cc;
+  --ok-ink: #0f5c61;
+  --warn: #ffd294;
+  --warn-ink: #7a4a00;
+  --bad: #ff847d;
+  --bad-ink: #8a1410;
+  --danger: #e40014;
+
+  --shadow-hard: 6px 6px 0 var(--ink);
+  --shadow-hard-sm: 3px 3px 0 var(--ink);
+  --radius: 0;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 24px;
+  --text-2xl: clamp(30px, 3vw, 44px);
+
+  --tracking-chrome: 0.1em;
+  --tracking-eyebrow: 0.14em;
+  --tracking-title: -0.055em;
+
+  --header-h: 66px;
+  --content-w: 1280px;
+  --gutter: clamp(1.25rem, 3vw, 1.75rem);
+}
