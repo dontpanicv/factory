@@ -13,7 +13,16 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "preact"
+    "jsxImportSource": "preact",
+    "plugins": [
+      {
+        // Effect diagnostics in `tsc` (the `@effect/tsgo` build of TypeScript 7).
+        "name": "@effect/language-service",
+        // Effect 4 marks its HTTP, SQL and platform modules as unstable. Factory is built on them.
+        "diagnosticSeverity": { "unstableApiUsage": "off" },
+        "ignoreEffectSuggestionsInTscExitCode": false
+      }
+    ]
   },
-  "include": ["src", "test"]
+  "include": ["src", "e2e", "playwright.config.ts"]
 }

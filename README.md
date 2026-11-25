@@ -11,29 +11,33 @@ One Bun process serves the SPA and the REST API, and runs the agents.
 | --- | --- |
 | Runtime, package manager, bundler, tests | [Bun](https://bun.sh) |
 | Server | [Effect](https://effect.website) 4 (`effect/http` router on `@effect/platform-bun`) |
-| Database | SQLite: `@effect/sql-sqlite-bun` with migrations (`src/server/db.ts`), file `<FACTORY_DATA_DIR>/factory.sqlite` |
+| Database | SQLite: `@effect/sql-sqlite-bun` with migrations (`src/app/server/migrations.ts`), file `<FACTORY_DATA_DIR>/factory.sqlite` |
 | Board | `@vercel/board` with the `local()` backend: SQLite at `<FACTORY_DATA_DIR>/board/local.db` |
 | Agents | [Pi Durable](https://github.com/earendil-works/pi) (`@earendil-works/pi-durable`): the model loop in the Factory process, stored in `<FACTORY_DATA_DIR>/agents.sqlite` |
 | Sandboxes | Docker containers, reached through `@earendil-works/pi-env` |
 | Sign-in | [Better Auth](https://better-auth.com) with Google, or local mode |
-| UI | Preact SPA (`src/client`), bundled by Bun's HTML imports, Factory design tokens (`src/client/css`) |
-| Quality | TypeScript (`tsc --noEmit`), Biome via Ultracite, lefthook pre-commit |
+| UI | Preact SPA (the `client` directories), bundled by Bun's HTML imports, Factory design tokens (`src/shared/client/css`) |
+| Quality | TypeScript 7 with Effect diagnostics (`@effect/tsgo`), Biome via Ultracite with boundary rules, lefthook pre-commit |
+| Tests | End-to-end tests of the REST API with Playwright Test (`e2e/`) |
 
 ## Layout
 
+Factory is a modular monolith. Each directory of `src` is a slice of the domain with its `server` (tables, logic,
+endpoints) and its `client` (pages). The rules are in [AGENTS.md](AGENTS.md), Architecture.
+
 ```text
-src/server/main.ts      HTTP server: the SPA routes and the Effect router
-src/server/routes.ts    REST API: /api/board/* (the board), /api/session, /api/auth/*, /login/google
-src/server/board.ts     the board: local() backend, the person from the Factory session
-src/server/auth/        Better Auth + Google sign-in, Google group check, local mode
-src/server/config.ts    settings from the environment (.env.example)
-src/server/db.ts        SQLite and its migrations
-src/server/factory/     the agents: store.ts (definitions, secrets, runs), runner.ts (tasks to agents, schedules),
-                        sandbox.ts (the sandbox provider), workspace.ts (checkouts, skills), tools.ts (board tools),
-                        models.ts (model credentials), flow.ts, api.ts (/api/factory)
-src/client/             the SPA: board.tsx (sidebar, feeds, tasks), composer.tsx, message.tsx, pane.tsx (thread pane),
-                        agents.tsx, setup.tsx, flow.tsx, run.tsx
-test/                   bun test
+src/main.ts        the server: the SPA routes and the router
+src/app/           puts the slices together: migrations, router, composition root, the shell of the pages
+src/shared/        the kernel: configuration, database, HTTP helpers, design system, API client
+src/identity/      sign-in: Better Auth with Google and the group check, local mode
+src/board/         the board: the Vercel Board, and its pages (feeds, tasks, composer, thread pane)
+src/agents/        agents: definitions, runner, prompt, board tools, runs and their logs, model credentials
+src/sandbox/       sandboxes: the provider (Docker), shared resources
+src/projects/      Git repositories for the sandboxes
+src/skills/        skills for the agents
+src/secrets/       sealed secrets
+src/flow/          the flow of tasks between channels
+e2e/               end-to-end tests of the REST API (Playwright Test)
 ```
 
 ## REST API
@@ -126,7 +130,7 @@ does, and what its sandbox gets.
 A subscription uses a login of this computer: for ChatGPT the login of the Codex CLI (`codex login`,
 `~/.codex/auth.json`), for other providers Pi's (`pi`, then `/login`).
 
-**Sandboxes.** `SandboxProvider` (`src/server/factory/sandbox.ts`) is the only part that knows Docker: it starts
+**Sandboxes.** `SandboxProvider` (`src/sandbox/server/sandbox.ts`) is the only part that knows Docker: it starts
 a box with the pi-env daemon in it, and starts shared resources. Another provider (a VM, a remote host) needs
 only these methods. The default image `factory-sandbox:2` is built on first use (Debian with git, curl, ripgrep,
 jq, Python and Bun); an agent can name another image, which needs bash and git.
@@ -143,10 +147,14 @@ bun run dev              # portless + bun --watch, Bun bundles the SPA with hot 
 bun run start            # the same, production mode
 bun run build            # one executable with the SPA inside: dist/factory
 bun run serve            # run dist/factory under portless
-bun run verify           # typecheck, lint, tests
+bun run test             # end-to-end tests of the API, against a new instance
+bun run verify           # typecheck, lint, end-to-end tests
 ```
 
-Without portless: `PORT=4310 bun src/server/main.ts`, then open http://localhost:4310.
+Without portless: `PORT=4310 bun src/main.ts`, then open http://localhost:4310.
+
+The tests use only the REST API of a live instance. The tests of the agents need Docker and a model with
+credentials. `FACTORY_E2E_URL=<url> bun run test` runs them against an instance that runs already.
 
 For Google sign-in, set the Google values in `.env` and serve Factory on a host name that Google accepts as a
 redirect (not `*.localhost`), with `FACTORY_URL` set to it.

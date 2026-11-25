@@ -25,6 +25,54 @@
 - Treat boundary, query-key, form, and design-token lint failures as signs that the implementation shape is wrong.
 - Add guidance only for stable, non-obvious conventions that are not already enforced or documented elsewhere.
 
+## Architecture
+
+Factory is a modular monolith: one process, made of vertical slices of the domain.
+
+- Each directory of `src` is a slice: `identity`, `board`, `agents`, `sandbox`, `projects`, `skills`, `secrets`,
+  `flow`. A slice owns all of its part of the product: its tables, its logic, its endpoints (`server/`) and its
+  pages (`client/`).
+- `src/shared` is the kernel: what all slices use and no slice owns (configuration, the database, HTTP helpers,
+  the design system, the API client). The kernel imports no slice.
+- `src/app` puts the slices together: the migrations in their order, the router, the composition root
+  (`server/factory.ts`), and the shell of the pages. `src/main.ts` starts the server. No slice imports `app`.
+- Client code reaches the server only through the REST API: `client/` does not import `server/`, and `server/`
+  does not import `client/`. A page defines the shape of the JSON that it reads.
+- A slice can import a different slice's `server` module when it needs that slice's data (the runner of the
+  agents reads projects, skills and secrets). Import cycles are not permitted.
+- Biome enforces these boundaries (`noRestrictedImports` and `noImportCycles` in `biome.jsonc`). When a boundary
+  rule fails, change the shape of the code: move the shared part into `shared`, or pass the data in. Do not add an
+  exception.
+- New functions go into the slice that owns the concept. Make a new slice when the concept has its own data and its
+  own endpoints. Do not add a layer that goes across the slices (a common `services` or `stores` directory).
+
+## Testing
+
+Factory has one kind of test: end-to-end tests of the REST API, as a black box, against a live instance.
+
+- The tests are in `e2e/` and run with Playwright Test (`@playwright/test`, its API testing). They use only HTTP
+  requests. They do not import code from `src` (Biome enforces this), and they do not open the pages.
+- Do not write unit tests, integration tests or tests of the pages. Prove each behaviour through the API: make the
+  request, then read the result through the API as a person or an agent would see it.
+- `bun run test` starts a new instance with empty data (`e2e/.data`) and runs all tests against it.
+  `FACTORY_E2E_URL=<url> bun run test` runs them against an instance that runs already.
+- The tests of the agents (`e2e/work.spec.ts`) use real sandboxes and a real model: they need Docker and a model
+  with credentials. `FACTORY_E2E_MODEL` selects the model. A full run takes approximately 3 minutes.
+- Each test file makes its own channels, agents and definitions with names that are new for each run, and removes
+  what it made. A test never depends on the data of a different file.
+- Each new endpoint and each change of behaviour needs a test in `e2e/`. When a behaviour cannot be seen through
+  the API, add the endpoint or the field that shows it. Do not test it from the inside.
+- Give a test the name of the behaviour in plain words: `an agent gives its task to a person, and goes on when the
+  person answers`.
+
+## Code Checks
+
+- `bun run typecheck` runs TypeScript 7 with the Effect diagnostics (`@effect/tsgo`). An Effect suggestion fails the
+  check: correct the code.
+- `bun run check` runs Biome through Ultracite: the `core`, `type-aware` and `react` presets, the Playwright rules
+  for `e2e/`, and the boundary rules of the architecture.
+- `bun run verify` runs the type check, the lint and the end-to-end tests. Run it before you say that work is done.
+
 # Ultracite Code Standards
 
 This project uses **Ultracite**, a zero-config preset that enforces strict code quality standards through automated formatting and linting.
@@ -129,10 +177,11 @@ Write code that is **accessible, performant, type-safe, and maintainable**. Focu
 
 ## Testing
 
-- Write assertions inside `it()` or `test()` blocks
-- Avoid done callbacks in async tests - use async/await instead
+- Write assertions inside `test()` blocks
+- Use async/await in tests, not done callbacks
 - Don't use `.only` or `.skip` in committed code
-- Keep test suites reasonably flat - avoid excessive `describe` nesting
+- Keep test files flat - avoid `describe` nesting
+- The rules for what Factory tests, and how, are in "Testing" above
 
 ## When Biome Can't Help
 

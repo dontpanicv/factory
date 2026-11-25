@@ -1,5 +1,7 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  // Ultracite: `core` has the rules for TypeScript, JSX, CSS and JSON, `type-aware` the rules that
+  // read types, and `react` the rules for components and hooks (Preact has the same model).
   "extends": [
     "ultracite/biome/core",
     "ultracite/biome/type-aware",
@@ -11,17 +13,25 @@
       "!!**/public/vendor",
       "!!**/data",
       "!!**/.agents/skills",
-      "!!**/.claude/skills"
+      "!!**/.claude/skills",
+      "!!**/playwright-report",
+      "!!**/test-results"
     ]
   },
   "javascript": { "globals": ["Bun"] },
   "linter": {
+    "domains": {
+      // The end-to-end tests of the API use Playwright Test.
+      "playwright": "all"
+    },
     "rules": {
       "correctness": {
         // Biome does not resolve the "exports" map of the effect package. tsc checks all imports.
         "noUnresolvedImports": "off"
       },
       "suspicious": {
+        // A slice that imports itself through another slice is not a slice.
+        "noImportCycles": "error",
         // The UI uses Preact JSX, where "class" is the native attribute name.
         "noUnknownAttribute": {
           "level": "error",
@@ -29,5 +39,152 @@
         }
       }
     }
-  }
+  },
+  // The boundaries of the modular monolith (AGENTS.md, Architecture).
+  "overrides": [
+    {
+      // The client runs in a browser: it reaches the server only through the REST API.
+      "includes": ["src/**/client/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/server/**", "bun:*", "node:*"],
+                    "message": "Client code does not import server code. Use the REST API."
+                  },
+                  {
+                    "group": ["**/app/**"],
+                    "message": "A slice does not import the app shell: the shell puts the slices together."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**/server/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/client/**"],
+                    "message": "Server code does not import client code."
+                  },
+                  {
+                    "group": ["**/app/**"],
+                    "message": "A slice does not import the app: the app puts the slices together."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // The kernel knows no slice. These rules replace the rules above for the kernel's files.
+      "includes": ["src/shared/client/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/agents/**",
+                      "**/app/**",
+                      "**/board/**",
+                      "**/flow/**",
+                      "**/identity/**",
+                      "**/projects/**",
+                      "**/sandbox/**",
+                      "**/secrets/**",
+                      "**/skills/**"
+                    ],
+                    "message": "The shared kernel does not import a slice. Move what the slices share into `shared`."
+                  },
+                  {
+                    "group": ["**/server/**", "bun:*", "node:*"],
+                    "message": "Client code does not import server code. Use the REST API."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // The kernel knows no slice. These rules replace the rules above for the kernel's files.
+      "includes": ["src/shared/server/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/agents/**",
+                      "**/app/**",
+                      "**/board/**",
+                      "**/flow/**",
+                      "**/identity/**",
+                      "**/projects/**",
+                      "**/sandbox/**",
+                      "**/secrets/**",
+                      "**/skills/**"
+                    ],
+                    "message": "The shared kernel does not import a slice. Move what the slices share into `shared`."
+                  },
+                  {
+                    "group": ["**/client/**"],
+                    "message": "Server code does not import client code."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // The tests see Factory only from the outside.
+      "includes": ["e2e/**"],
+      "linter": {
+        "rules": {
+          "performance": {
+            // A test does its steps in order: each request depends on the state that the one before it left.
+            "noAwaitInLoops": "off"
+          },
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/src/**"],
+                    "message": "An end-to-end test uses only the REST API. It does not import the code of Factory."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

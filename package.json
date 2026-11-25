@@ -3,16 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build src/server/main.ts --compile --production --outfile=dist/factory",
+    "build": "bun build src/main.ts --compile --production --outfile=dist/factory",
     "check": "ultracite check",
-    "dev": "portless factory bun --watch src/server/main.ts",
+    "dev": "portless factory bun --watch src/main.ts",
     "fix": "ultracite fix",
     "prepare": "lefthook install",
     "serve": "NODE_ENV=production portless factory dist/factory",
-    "start": "NODE_ENV=production portless factory bun src/server/main.ts",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "verify": "bun run typecheck && bun run check && bun test"
+    "start": "NODE_ENV=production portless factory bun src/main.ts",
+    "test": "playwright test",
+    "typecheck": "effect-tsgo tsc --noEmit",
+    "verify": "bun run typecheck && bun run check && bun run test"
   },
   "dependencies": {
     "@earendil-works/chord": "1.6.1",
@@ -33,7 +33,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
-    "@effect/language-service": "^0.87.3",
+    "@effect/tsgo": "^0.73.4",
+    "@playwright/test": "^1.65.1",
     "@types/bun": "^1.4.2",
     "@types/proper-lockfile": "^4.1.4",
     "lefthook": "^2.1.16",
