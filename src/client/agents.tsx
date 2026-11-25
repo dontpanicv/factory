@@ -223,12 +223,14 @@ const Schedules = (props: {
               />
             </label>
             <label class="field schedule__text">
-              <span class="label">The task</span>
-              <input
-                class="input"
+              <span class="label">The task: a title, then the details</span>
+              <textarea
+                class="textarea"
                 defaultValue={row.text}
                 name="schedule.text"
-                placeholder="Check the logs of production for new errors"
+                placeholder={
+                  "Check the logs of production for new errors\nLook at the last hour. Make a task in #pipes/dev for each new error."
+                }
                 required
               />
             </label>

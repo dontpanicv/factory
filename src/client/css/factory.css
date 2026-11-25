@@ -161,6 +161,12 @@
   min-height: 140px;
 }
 
+.card .schedule .textarea {
+  min-height: 72px;
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+}
+
 .card .empty {
   padding: var(--space-5) var(--space-4);
 }
