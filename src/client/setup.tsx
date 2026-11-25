@@ -11,6 +11,7 @@ import {
   useOverview,
   values,
 } from "./factory.ts";
+import { Select } from "./select.tsx";
 
 /** What the agents work with: the repositories, the shared resources, the skills and the secrets. */
 
@@ -50,7 +51,7 @@ const usedBy = (
   const agents = overview.agents
     .filter((agent) => agent[kind].includes(name))
     .map((agent) => agent.name);
-  return agents.length === 0 ? "no agent" : agents.join(", ");
+  return agents.length === 0 ? "not used" : `used by ${agents.join(", ")}`;
 };
 
 /** A list of definitions with a form for the one that is open. */
@@ -106,6 +107,8 @@ interface TextProps {
   readonly readOnly?: boolean;
   readonly required?: boolean;
   readonly secret?: boolean;
+  /** A text area for a few lines. */
+  readonly short?: boolean;
   readonly value: string;
 }
 
@@ -114,7 +117,7 @@ const Control = (props: TextProps) => {
   if (props.area === true) {
     return (
       <textarea
-        class="textarea"
+        class={props.short === true ? "textarea textarea--short" : "textarea"}
         defaultValue={props.value}
         name={props.name}
         placeholder={props.placeholder}
@@ -223,7 +226,7 @@ const NewButton = (props: {
   readonly title: string;
 }) =>
   props.open === null ? null : (
-    <tr>
+    <tr class="table__foot">
       <td colSpan={4}>
         <button
           class="button button--small button--secondary"
@@ -317,30 +320,31 @@ const Projects = (props: {
         placeholder="main"
         value={project?.branch ?? "main"}
       />
-      <label class="field">
+      <div class="field">
         <span class="label">Token</span>
-        <select class="select" name="tokenSecret">
-          <option value="">None: a public repository, read only</option>
-          {overview.secrets.map((secret) => (
-            <option
-              key={secret}
-              selected={secret === project?.tokenSecret}
-              value={secret}
-            >
-              {secret}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Token"
+          name="tokenSecret"
+          options={[
+            { label: "None: a public repository, read only", value: "" },
+            ...overview.secrets.map((secret) => ({
+              label: secret,
+              value: secret,
+            })),
+          ]}
+          value={project?.tokenSecret ?? ""}
+        />
         <span class="hint">
           A secret with a token that can read and push. Git in the sandbox uses
           it.
         </span>
-      </label>
+      </div>
       <Text
         area
         label="Setup, after the checkout"
         name="setup"
         placeholder="bun install"
+        short
         value={project?.setup ?? ""}
       />
     </Editor>
@@ -467,6 +471,7 @@ const Resources = (props: {
         label="Environment, KEY=value lines"
         name="env"
         placeholder="POSTGRES_HOST_AUTH_METHOD=trust"
+        short
         value={resource?.env ?? ""}
       />
       <div class="field">

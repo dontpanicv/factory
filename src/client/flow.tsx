@@ -51,11 +51,12 @@ const NODE_H = 66;
 const COLUMN_GAP = 96;
 const ROW_GAP = 30;
 const PAD = 24;
-/** Room below the boxes for the lines that go back. */
-const BACK_DROP = 46;
 const LOOP_RISE = 34;
-/** Room above the boxes for the lines that go over a column. */
-const SKIP_RISE = 70;
+/** The first lane of the lines over and below the boxes, and the room of each next lane. */
+const ARC_BASE = 36;
+const ARC_STEP = 20;
+/** Half of a count's box, and some air. */
+const COUNT_ROOM = 16;
 const WIDTH_MIN = 1.5;
 const WIDTH_RANGE = 12;
 
@@ -138,13 +139,18 @@ const arc = (x1: number, y1: number, x2: number, y2: number, far: number) => ({
   path: `M${x1},${y1} C${x1},${far} ${x2},${far} ${x2},${y2}`,
 });
 
+/** How far from the boxes the line of a lane turns: each lane is one step farther. */
+const reach = (lane: number) => ARC_BASE + lane * ARC_STEP;
+
 /**
  * The line of an edge between two placed boxes: straight to the next column, over the boxes to a
- * later column, below the boxes to an earlier one, and a loop on a box to itself.
+ * later column, below the boxes to an earlier one, and a loop on a box to itself. Lines over and
+ * below the boxes each have a lane, so their counts do not cover each other.
  */
 const line = (
   from: PlacedNode,
   to: PlacedNode,
+  lane: number,
   top: number,
   bottom: number
 ) => {
@@ -165,20 +171,27 @@ const line = (
         from.y + NODE_H,
         to.x + NODE_W / 2,
         to.y + NODE_H,
-        bottom + BACK_DROP
+        bottom + reach(lane)
       ),
     };
   }
   if (to.layer > from.layer + 1) {
+    const x1 = from.x + NODE_W * 0.75;
+    const far = top - reach(lane);
+    if (to.kind !== "end") {
+      return {
+        back: false,
+        ...arc(x1, from.y, to.x + NODE_W * 0.25, to.y, far),
+      };
+    }
+    // The ends are in one column: a line comes down to the left side of its end, not through the end above it.
+    const turn = to.x - COLUMN_GAP;
+    const y2 = to.y + NODE_H / 2;
     return {
       back: false,
-      ...arc(
-        from.x + NODE_W * 0.75,
-        from.y,
-        to.x + NODE_W * 0.25,
-        to.y,
-        top - SKIP_RISE
-      ),
+      labelX: middle(x1, x1, turn, to.x),
+      labelY: middle(from.y, far, far, y2),
+      path: `M${x1},${from.y} C${x1},${far} ${turn},${far} ${to.x},${y2}`,
     };
   }
   const x1 = from.x + NODE_W;
@@ -203,34 +216,53 @@ export const layout = (flow: Flow) => {
     out.set(edge.from, [...(out.get(edge.from) ?? []), edge]);
   }
   const columns = columnsOf(flow, out);
-  const tallest = Math.max(1, ...columns.map((column) => column.length));
+  const column = new Map(
+    columns.flatMap((list, index) => list.map((node) => [node.id, index]))
+  );
+  const span = (edge: FlowEdge) =>
+    (column.get(edge.to) ?? 0) - (column.get(edge.from) ?? 0);
+  // The shortest line has the lane next to the boxes, so lines do not cross more than they must.
+  const over = flow.edges
+    .filter((edge) => span(edge) > 1)
+    .toSorted((a, b) => span(a) - span(b));
+  const under = flow.edges
+    .filter((edge) => edge.from !== edge.to && span(edge) <= 0)
+    .toSorted((a, b) => span(b) - span(a));
+  // A line turns at three quarters of its reach: the room is for the farthest lane and its count.
+  const room = (lanes: number) =>
+    lanes === 0 ? 0 : reach(lanes - 1) * 0.75 + COUNT_ROOM;
+  const sky = Math.max(LOOP_RISE, room(over.length));
+  const ground = room(under.length);
+  const tallest = Math.max(1, ...columns.map((list) => list.length));
   const height = tallest * (NODE_H + ROW_GAP) - ROW_GAP;
-  const nodes: PlacedNode[] = columns.flatMap((column, index) => {
-    const top = (height - (column.length * (NODE_H + ROW_GAP) - ROW_GAP)) / 2;
-    return column.map((node, row) => ({
+  const top = PAD + sky;
+  const nodes: PlacedNode[] = columns.flatMap((list, index) => {
+    const offset = (height - (list.length * (NODE_H + ROW_GAP) - ROW_GAP)) / 2;
+    return list.map((node, row) => ({
       ...node,
       layer: index,
       x: PAD + index * (NODE_W + COLUMN_GAP),
-      y: PAD + SKIP_RISE + top + row * (NODE_H + ROW_GAP),
+      y: top + offset + row * (NODE_H + ROW_GAP),
     }));
   });
   const at = new Map(nodes.map((node) => [node.id, node]));
   const most = Math.max(1, ...flow.edges.map((edge) => edge.count));
-  const bottom = PAD + SKIP_RISE + height;
+  const bottom = top + height;
   const edges: PlacedEdge[] = flow.edges.flatMap((edge) => {
     const from = at.get(edge.from);
     const to = at.get(edge.to);
+    const lane = Math.max(over.indexOf(edge), under.indexOf(edge), 0);
     return from === undefined || to === undefined
       ? []
       : {
           ...edge,
-          ...line(from, to, PAD + SKIP_RISE, bottom),
+          ...line(from, to, lane, top, bottom),
           width: WIDTH_MIN + (WIDTH_RANGE * edge.count) / most,
         };
   });
   return {
     edges,
-    height: bottom + (edges.some((edge) => edge.back) ? BACK_DROP + PAD : PAD),
+    height: bottom + ground + PAD,
     nodes,
     width: PAD * 2 + columns.length * (NODE_W + COLUMN_GAP) - COLUMN_GAP,
   };
@@ -302,7 +334,6 @@ const NodeBox = (props: { readonly node: PlacedNode }) => {
         <text class="flow-node__fact flow-node__fact--agents" x="12" y="56">
           {cut(facts.length === 0 ? "people" : facts.join(" · "))}
         </text>
-        <title>{`#${node.label}`}</title>
       </g>
     </a>
   );
@@ -346,9 +377,7 @@ const Graph = (props: { readonly flow: Flow }) => {
               markerEnd: `url(#arrow-${edgeKind(edge)})`,
               strokeWidth: edge.width,
             }}
-          >
-            <title>{`${nodeName(edge.from)} → ${nodeName(edge.to)}: ${edge.count}`}</title>
-          </path>
+          />
         ))}
         {placed.nodes.map((node) => (
           <NodeBox key={node.id} node={node} />

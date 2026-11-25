@@ -2,7 +2,8 @@ import { useEffect, useState } from "preact/hooks";
 import { RunChip, RunTable } from "./agents.tsx";
 import { get, post } from "./api.ts";
 import { type AgentRun, duration, FACTORY, LIVE_STATES } from "./factory.ts";
-import { Linked } from "./message.tsx";
+import { ChevronDown } from "./icons.tsx";
+import { Inline, Rich } from "./message.tsx";
 
 /** What an agent did on a task: the run's result, then each step in one line. */
 
@@ -41,7 +42,7 @@ const StepRow = (props: { readonly step: Step }) => {
       >
         <span class="step__time">{clock(step.at)}</span>
         <div class="step__text">
-          <Linked text={step.text} />
+          <Rich text={step.text} />
         </div>
       </li>
     );
@@ -51,8 +52,11 @@ const StepRow = (props: { readonly step: Step }) => {
       <span class="step__time">{clock(step.at)}</span>
       <details class="step__tool">
         <summary>
+          <span class="caret">
+            <ChevronDown />
+          </span>
           <span class="step__name">{step.tool}</span>
-          <code class="truncate">{step.text.split("\n")[0]}</code>
+          <code class="truncate">{step.text.replaceAll("\n", " ↵ ")}</code>
           {step.failed ? <span class="step__flag">failed</span> : null}
         </summary>
         <pre class="log">{`${step.text.includes("\n") ? `${step.text}\n\n` : ""}${step.output || "(no output)"}`}</pre>
@@ -118,7 +122,7 @@ export const RunPage = (props: {
       {error === null ? null : <div class="notice notice--bad">{error}</div>}
       {run.note === null || run.note === "" ? null : (
         <div class={run.state === "done" ? "notice" : "notice notice--warn"}>
-          <Linked text={run.note} />
+          <Inline text={run.note} />
         </div>
       )}
       <dl class="facts">

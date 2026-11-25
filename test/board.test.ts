@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { cutForFeed } from "../src/client/message.tsx";
 import {
   boardHref,
   boardQuery,
@@ -114,4 +115,13 @@ test("a claim past its lease is ready", () => {
   } as TaskView;
   expect(stateNow(task, Date.parse("2026-01-01T00:01:00Z"))).toBe("ready");
   expect(stateNow(task, Date.parse("2025-12-31T23:59:00Z"))).toBe("claimed");
+});
+
+test("a long message is cut in a feed, and a short one is not", () => {
+  expect(cutForFeed("one\ntwo")).toBeNull();
+  const patch = Array.from({ length: 40 }, (_, line) => `line ${line}`).join(
+    "\n"
+  );
+  expect(cutForFeed(patch)?.split("\n").length).toBe(12);
+  expect(cutForFeed("x".repeat(2000))?.length).toBe(900);
 });

@@ -368,7 +368,7 @@ const Counts = (props: {
   const counts = countStates(props.open, props.now);
   return (
     <span class="counts">
-      {COUNTED.map((state) => (
+      {COUNTED.filter((state) => (counts[state] ?? 0) > 0).map((state) => (
         <a
           class={
             state === "blocked" && (counts.blocked ?? 0) > 0
@@ -684,10 +684,12 @@ const TaskRow = (props: {
   const { now, query } = props;
   const root = props.summary.message;
   const state = root.task === undefined ? null : stateNow(root.task, now);
+  // In the list of one channel, each row would say the same channel.
+  const oneChannel = query.channel !== null && !query.channel.endsWith("/");
   return (
     <a
       aria-current={query.thread === root.id ? "true" : undefined}
-      class="task-row"
+      class={oneChannel ? "task-row task-row--channel" : "task-row"}
       href={boardHref(query, { thread: root.id })}
     >
       <span class="task-row__state">
@@ -701,7 +703,9 @@ const TaskRow = (props: {
         ) : null}
       </span>
       <span class="task-row__now truncate">{taskNow(root, now)}</span>
-      <span class="task-row__where truncate">{`#${root.channel}`}</span>
+      {oneChannel ? null : (
+        <span class="task-row__where truncate">{`#${root.channel}`}</span>
+      )}
       <span class="task-row__age">
         {shortAge(lastActive(props.summary), now)}
       </span>

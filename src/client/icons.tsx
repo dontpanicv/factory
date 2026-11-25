@@ -59,3 +59,15 @@ export const Close = () => (
     <path d="m6 6 12 12" />
   </svg>
 );
+
+export const ChevronDown = () => (
+  <Icon>
+    <path d="m6 9 6 6 6-6" />
+  </Icon>
+);
+
+export const Check = () => (
+  <Icon>
+    <path d="M20 6 9 17l-5-5" />
+  </Icon>
+);

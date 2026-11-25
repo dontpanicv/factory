@@ -117,7 +117,7 @@ const LabelsPanel = (props: {
           aria-label="Label key"
           autoFocus
           class="input mono"
-          list="composer-label-keys"
+          data-suggest="composer-label-keys"
           name="key"
           placeholder="key"
           required
@@ -126,7 +126,7 @@ const LabelsPanel = (props: {
         <input
           aria-label="Label value"
           class="input mono"
-          list="composer-label-values"
+          data-suggest="composer-label-values"
           name="value"
           placeholder="value"
         />
@@ -181,8 +181,8 @@ const LaterPanel = (props: {
           aria-label="Send in"
           autoFocus
           class="input mono"
+          data-suggest="composer-later-in"
           defaultValue={props.value?.in ?? ""}
-          list="composer-later-in"
           name="in"
           placeholder="2h"
         />
@@ -199,8 +199,8 @@ const LaterPanel = (props: {
         <input
           aria-label="Send every"
           class="input mono"
+          data-suggest="composer-later-every"
           defaultValue={props.value?.every ?? ""}
-          list="composer-later-every"
           name="every"
           placeholder="never"
         />
@@ -379,7 +379,7 @@ const Field = (props: {
     <input
       aria-label={props.label}
       autoComplete="off"
-      list={props.list}
+      data-suggest={props.list}
       onInput={props.onInput}
       placeholder={props.placeholder}
       value={props.value}

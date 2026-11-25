@@ -41,6 +41,68 @@ export const Linked = (props: { readonly text: string }) => {
   return <>{parts}</>;
 };
 
+const FENCE = /```[^\n]*\n([\s\S]*?)(?:```|$)/g;
+const MARKED = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/;
+
+/** A line of text with `code` and **strong** words, and its URLs as links. */
+export const Inline = (props: { readonly text: string }) => {
+  let at = 0;
+  return (
+    <>
+      {props.text.split(MARKED).map((part) => {
+        const key = at;
+        at += part.length;
+        if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
+          return <code key={key}>{part.slice(1, -1)}</code>;
+        }
+        if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={key}>{part.slice(2, -2)}</strong>;
+        }
+        return <Linked key={key} text={part} />;
+      })}
+    </>
+  );
+};
+
+/**
+ * The text of a message: agents write Markdown, so a fenced block shows as code, and `code` and
+ * **strong** words show as such. All other text shows as it was written.
+ */
+export const Rich = (props: { readonly text: string }) => {
+  const blocks: VNode[] = [];
+  let from = 0;
+  for (const match of props.text.matchAll(FENCE)) {
+    const before = props.text.slice(from, match.index).trim();
+    if (before !== "") {
+      blocks.push(<Inline key={`text-${from}`} text={before} />);
+    }
+    blocks.push(
+      <pre class="message__code" key={`code-${match.index}`}>
+        {(match[1] ?? "").trimEnd()}
+      </pre>
+    );
+    from = match.index + match[0].length;
+  }
+  const rest = props.text.slice(from).trim();
+  if (rest !== "") {
+    blocks.push(<Inline key={`text-${from}`} text={rest} />);
+  }
+  return <>{blocks}</>;
+};
+
+/** A message of more lines or letters than this is cut in a feed: its thread shows all of it. */
+const FEED_LINES = 12;
+const FEED_LETTERS = 900;
+
+export const cutForFeed = (text: string) => {
+  const lines = text.split("\n");
+  const cut =
+    lines.length > FEED_LINES
+      ? lines.slice(0, FEED_LINES).join("\n")
+      : text.slice(0, FEED_LETTERS);
+  return cut.length < text.length ? cut : null;
+};
+
 export const Avatar = (props: {
   /** An agent of Factory has a filled avatar. */
   readonly agent?: boolean;
@@ -136,7 +198,7 @@ export const TaskLine = (props: {
       ) : null}
       {note === null || note === "" ? null : (
         <span class="task-line__note">
-          <Linked text={note} />
+          <Inline text={note} />
         </span>
       )}
     </div>
@@ -208,6 +270,24 @@ const Attachments = (props: { readonly message: MessageView }) =>
       ))}
     </div>
   );
+
+/** The text of a message. In a feed a long text is cut, with a link to its thread. */
+const MessageText = (props: {
+  readonly href: string | null;
+  readonly text: string;
+}) => {
+  const cut = props.href === null ? null : cutForFeed(props.text);
+  return (
+    <div class="message__text">
+      <Rich text={cut ?? props.text} />
+      {cut === null || props.href === null ? null : (
+        <a class="message__more" href={props.href}>
+          {`… ${props.text.split("\n").length} lines. Open the thread to read all.`}
+        </a>
+      )}
+    </div>
+  );
+};
 
 /**
  * One message, as the Board viewer shows it: an avatar, the author, where and when, the text, the task line of a
@@ -281,9 +361,7 @@ export const Message = (props: {
         {message.deleted ? (
           <p class="message__removed">message removed</p>
         ) : (
-          <div class="message__text">
-            <Linked text={message.text} />
-          </div>
+          <MessageText href={props.href} text={message.text} />
         )}
         <Attachments message={message} />
         {message.task === undefined ||

@@ -4,7 +4,7 @@ import { useState } from "preact/hooks";
 import { ApiError, get, post } from "./api.ts";
 import { fieldOf, type Run } from "./board.tsx";
 import { Composer, type Sent } from "./composer.tsx";
-import { Lease, Linked, Message, StateMark, Timeline } from "./message.tsx";
+import { Inline, Lease, Message, StateMark, Timeline } from "./message.tsx";
 import {
   actorName,
   type BoardQuery,
@@ -274,17 +274,17 @@ const TaskCard = (props: {
             {task.blocked.kind ? (
               <span class="tag">{task.blocked.kind}</span>
             ) : null}{" "}
-            <Linked text={task.blocked.reason} />
+            <Inline text={task.blocked.reason} />
           </Fact>
         )}
         {task.result ? (
           <Fact label="result">
-            <Linked text={task.result} />
+            <Inline text={task.result} />
           </Fact>
         ) : null}
         {task.reason ? (
           <Fact label="reason">
-            <Linked text={task.reason} />
+            <Inline text={task.reason} />
           </Fact>
         ) : null}
       </dl>

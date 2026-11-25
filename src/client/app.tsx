@@ -19,6 +19,7 @@ import {
 import { loadThread, type ThreadData, ThreadPane } from "./pane.tsx";
 import { followLink, navigate, useUrl } from "./route.ts";
 import { RunPage } from "./run.tsx";
+import { Suggestions } from "./select.tsx";
 import { SetupPage } from "./setup.tsx";
 
 const TICK_MS = 15_000;
@@ -424,6 +425,7 @@ export const App = () => {
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: the links inside handle the keys; this only routes their clicks.
     <div class="app" onClick={followLink}>
       <Header page={page} user={user} />
+      <Suggestions />
       {page === "board" ? (
         <main class="board-shell">
           <Board query={boardQuery(url)} user={user.name} />

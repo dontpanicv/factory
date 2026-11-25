@@ -14,6 +14,7 @@ import {
 } from "./factory.ts";
 import { shortAge } from "./model.ts";
 import { navigate } from "./route.ts";
+import { Select } from "./select.tsx";
 
 /** The agents: who they are, what they can reach, and what they did. */
 
@@ -215,8 +216,8 @@ const Schedules = (props: {
               <span class="label">Task in channel</span>
               <input
                 class="input"
+                data-suggest="channels"
                 defaultValue={row.channel}
-                list="channels"
                 name="schedule.channel"
                 placeholder="ops/checks"
                 required
@@ -449,54 +450,48 @@ const ModelSection = (props: SectionProps) => {
       hint="The brain: it runs in Factory, not in the sandbox"
       title="Model"
     >
-      <div class="fields">
-        <label class="field fields__wide">
+      <div class="fields fields--model">
+        <div class="field">
           <span class="label">Model</span>
-          <select class="select" name="model">
-            <option value="">Choose a model…</option>
-            {models.map((model) => (
-              <option
-                key={model}
-                selected={model === agent?.model}
-                value={model}
-              >
-                {model}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label class="field">
+          <Select
+            label="Model"
+            name="model"
+            options={[
+              { label: "Choose a model…", value: "" },
+              ...models.map((model) => ({ label: model, value: model })),
+            ]}
+            value={agent?.model ?? ""}
+          />
+        </div>
+        <div class="field">
           <span class="label">Thinking</span>
-          <select class="select" name="thinking">
-            {THINKING.map((level) => (
-              <option
-                key={level}
-                selected={level === (agent?.thinking ?? "medium")}
-                value={level}
-              >
-                {level}
-              </option>
-            ))}
-          </select>
-        </label>
+          <Select
+            label="Thinking"
+            name="thinking"
+            options={THINKING.map((level) => ({ label: level, value: level }))}
+            value={agent?.thinking ?? "medium"}
+          />
+        </div>
         <label class="field">
           <span class="label">Most tool rounds</span>
           <input
-            class="input"
+            class="input mono"
             defaultValue={String(agent?.maxTurns ?? 80)}
-            min="1"
+            inputMode="numeric"
             name="maxTurns"
-            type="number"
+            pattern="[0-9]+"
+            required
           />
         </label>
         <label class="field">
           <span class="label">Tasks at one time</span>
           <input
-            class="input"
+            class="input mono"
             defaultValue={String(agent?.parallel ?? 1)}
-            min="1"
+            inputMode="numeric"
             name="parallel"
-            type="number"
+            pattern="[0-9]+"
+            required
           />
         </label>
       </div>
@@ -571,7 +566,7 @@ const AgentEditor = (props: {
   );
   return (
     <form class="stack" onInput={edited} onSubmit={save}>
-      <div class="page-head page-head--tight">
+      <div class="page-head page-head--sticky page-head--tight">
         <div>
           <span class="eyebrow">Agent</span>
           <h1 class="title title--small">{agent?.name ?? "New agent"}</h1>
