@@ -105,7 +105,7 @@ test("an agent takes a task of its channel, works in its box, answers, and hands
   faux.setResponses([
     (transcript) => {
       prompt = JSON.stringify(transcript);
-      return call("bash", { command: "echo $API_TOKEN > note.txt && ls app" });
+      return call("bash", { command: "echo $API_TOKEN > note.txt && ls" });
     },
     call("board_task", { channel: "dev", text: "Fix the leak\nIt leaks." }),
     fauxAssistantMessage([
@@ -123,8 +123,13 @@ test("an agent takes a task of its channel, works in its box, answers, and hands
   // The brain got the role, the repository's instructions and both skills.
   expect(prompt).toContain("Finds problems.");
   expect(prompt).toContain("Always run the tests.");
-  expect(prompt).toContain("triage: How to triage");
-  expect(prompt).toContain("release: How to release");
+  expect(prompt).toContain("<name>triage</name>");
+  expect(prompt).toContain("<name>release</name>");
+  // It also got what the Pi coding agent gives its model: the tools, their rules, and where it works.
+  expect(prompt).toContain("- edit: Make precise file edits");
+  expect(prompt).toContain("Use read to examine files instead of cat or sed.");
+  expect(prompt).toContain("<project_instructions path=");
+  expect(prompt).toContain("/app\\n</cwd>");
   // The hands ran in the box, with the secret and the checkout.
   expect(started).toEqual(["resource db", "box API_TOKEN"]);
   const steps = await runner.steps(run as NonNullable<typeof run>);

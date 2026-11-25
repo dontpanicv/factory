@@ -16,7 +16,16 @@ import { type Agent, consumes, type Project, type Store } from "./store.ts";
 
 const context = BACKGROUND_CONTEXT;
 const OUTPUT_MAX = 4000;
-const CONTEXT_MAX = 20_000;
+/** The most of one AGENTS.md that goes into the instructions. */
+const CONTEXT_MAX = 50_000;
+/** The instruction files of a directory, as Pi looks for them: the first that is there. */
+const CONTEXT_FILES = [
+  "AGENTS.override.md",
+  "AGENTS.md",
+  "AGENTS.MD",
+  "CLAUDE.md",
+  "CLAUDE.MD",
+];
 const FILE_MARK = "@@file ";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -126,6 +135,7 @@ const skillsOf = async (
       print(
         [
           `${root}/*/.agents/skills/*/SKILL.md`,
+          `${root}/*/.pi/skills/*/SKILL.md`,
           `${root}/*/.claude/skills/*/SKILL.md`,
         ],
         "head -n 20"
@@ -140,7 +150,7 @@ const skillsOf = async (
   return [...byName.values()];
 };
 
-/** Put the repositories and the skills in the box. Answers the agent's instructions. */
+/** Put the repositories and the skills in the box. Answers the agent's instructions and its working directory. */
 export const prepare = async (input: {
   readonly agent: Agent;
   readonly board: Board;
@@ -157,10 +167,16 @@ export const prepare = async (input: {
   const contexts = files(
     await sh(
       env,
-      print([`${quote(workspace)}/*/AGENTS.md`], `head -c ${CONTEXT_MAX}`),
+      `for d in ${quote(workspace)}/*/; do for n in ${CONTEXT_FILES.join(" ")}; do if [ -f "$d$n" ]; then echo "${FILE_MARK}$d$n"; head -c ${CONTEXT_MAX} "$d$n"; echo; break; fi; done; done; true`,
       "The search for AGENTS.md"
     )
   );
+  // With one repository the agent works in it, as Pi does when it starts in a repository.
+  const [only] = projects;
+  const cwd =
+    projects.length === 1 && only !== undefined
+      ? `${workspace}/${only.name}`
+      : workspace;
   const others = store.list("agents").filter((other) => other.enabled);
   const channels = (await input.board.channels()).channels.map((channel) => ({
     agents: others
@@ -168,10 +184,11 @@ export const prepare = async (input: {
       .map((other) => other.name),
     path: channel.path,
   }));
-  return instructionsOf({
+  const instructions = instructionsOf({
     agent,
     channels,
     contexts,
+    cwd,
     projects,
     resources: agent.resources.flatMap(
       (name) => store.get("resources", name) ?? []
@@ -179,4 +196,5 @@ export const prepare = async (input: {
     skills,
     workspace,
   });
+  return { cwd, instructions };
 };

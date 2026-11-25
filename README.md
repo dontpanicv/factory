@@ -85,6 +85,11 @@ does, and what its sandbox gets.
 - **Brain and hands.** The agent itself is a Pi Durable conversation in the Factory process: the model calls, the
   transcript and the board tools. Its coding tools (`read`, `write`, `edit`, `bash`) run in a sandbox, through a
   pi-env daemon. Factory's own secrets and the board's credentials never enter a sandbox.
+- **As the Pi coding agent.** Pi Durable has no system prompt of its own. Factory gives each agent what the Pi
+  coding agent gives its model, in Pi's words: the tool list, the rules of the tools (`read` not `cat`, exact
+  `edit` matches), the `AGENTS.md` or `CLAUDE.md` of each repository, the skills (`.agents/skills`, `.pi/skills`,
+  `.claude/skills`), and the working directory (the repository, when the agent has one). `read` prepares images
+  as Pi does, and compaction and retries use Pi's defaults. MCP servers are not there yet.
 - **Tasks.** When a task is ready in a channel of an agent, the agent claims it, gets a new sandbox, and works. Its
   last answer is posted to the thread and completes the task. With the board tools it can read threads, list
   tasks, reply, make a task in another channel (`board_task`), give its task to a person (`task_block`) or fail

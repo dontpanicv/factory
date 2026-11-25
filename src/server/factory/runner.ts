@@ -9,8 +9,10 @@ import {
   type Submission,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { createFitImagesExtension } from "@earendil-works/pi-durable/images/fit";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { Connection, RemoteExecutionEnv } from "@earendil-works/pi-env";
 import type { Board } from "@vercel/board";
 import { threadText } from "./prompt.ts";
@@ -107,7 +109,10 @@ export const startRunner = async (options: {
   const contexts = new Map<number, RunContext>();
   const envs = new Map<number, ExecutionEnv>();
   const registry = createRegistry();
-  registry.install(CodingTools);
+  // As in the Pi coding agent: `read` turns an image upright and makes it fit the model.
+  const images = await createNodePhotonImages();
+  registry.install(createCodingTools({ images }));
+  registry.install(createFitImagesExtension(images));
   registry.install(boardTools((id) => contexts.get(id)));
   const harness = await Harness.open(
     options.file === null
@@ -117,6 +122,15 @@ export const startRunner = async (options: {
       env: ({ conversationId }) => envs.get(conversationId),
       models: options.models,
       registry,
+      // The defaults of the Pi coding agent (pi's `settings-defaults.ts`).
+      settings: {
+        compaction: {
+          enabled: true,
+          keepRecentTokens: 20_000,
+          reserveTokens: 16_384,
+        },
+        retry: { maxRetries: 3 },
+      },
     },
     context
   );
@@ -183,25 +197,27 @@ export const startRunner = async (options: {
       if (conversation === undefined || submission === undefined) {
         throw new Error("The conversation of the run is not in storage.");
       }
+      env.cwd = (await conversation.agent(context)).cwd ?? env.cwd;
       contexts.set(conversation.id, runContext);
       envs.set(conversation.id, env);
       harness.resume();
       return { conversation, submission };
     }
-    const instructions = await prepare({
+    const { cwd, instructions } = await prepare({
       agent,
       board,
       env,
       store,
       workspace: env.cwd,
     });
+    env.cwd = cwd;
     const thread = await runContext.me.thread(run.taskId, {
       limit: THREAD_LIMIT,
     });
     const conversation = await harness.createConversation(
       {
         agent: {
-          cwd: env.cwd,
+          cwd,
           instructions,
           maxTurns: agent.maxTurns,
           model: modelOf(agent),
