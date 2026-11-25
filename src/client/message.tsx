@@ -46,14 +46,20 @@ export const Avatar = (props: {
   readonly agent?: boolean;
   readonly name: string;
   readonly small?: boolean;
-}) => (
-  <span
-    aria-hidden="true"
-    class={`avatar${props.small === true ? "avatar--small" : ""}${props.agent === true ? "avatar--agent" : ""}`}
-  >
-    {initialOf(props.name)}
-  </span>
-);
+}) => {
+  const classes = ["avatar"];
+  if (props.small === true) {
+    classes.push("avatar--small");
+  }
+  if (props.agent === true) {
+    classes.push("avatar--agent");
+  }
+  return (
+    <span aria-hidden="true" class={classes.join(" ")}>
+      {initialOf(props.name)}
+    </span>
+  );
+};
 
 /** A task's state with its mark: `○ to do`. The board's own word is in the tooltip. */
 export const StateMark = (props: { readonly state: TaskState }) => (
@@ -291,7 +297,11 @@ export const Message = (props: {
         props.href === null ? null : (
           <a class="message__replies" href={props.href}>
             {props.replies.last === null ? null : (
-              <Avatar name={actorName(props.replies.last.by.actor)} small />
+              <Avatar
+                agent={isAgent(props.replies.last.by.actor)}
+                name={actorName(props.replies.last.by.actor)}
+                small
+              />
             )}
             {`${props.replies.count} ${props.replies.count === 1 ? "reply" : "replies"}`}
             {props.replies.last === null
