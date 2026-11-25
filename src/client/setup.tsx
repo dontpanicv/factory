@@ -365,9 +365,10 @@ const Resources = (props: {
     const form = new FormData(event.currentTarget as HTMLFormElement);
     editor.save({
       command: String(form.get("command") ?? ""),
+      container: String(form.get("container") ?? "").trim(),
       description: String(form.get("description") ?? ""),
       env: String(form.get("env") ?? ""),
-      image: String(form.get("image")),
+      image: String(form.get("image") ?? "").trim(),
       name: String(form.get("name")),
       secrets: values(form, "secrets"),
     } as unknown as Resource);
@@ -399,7 +400,7 @@ const Resources = (props: {
                 </td>
                 <td class="table__fill">
                   <span class="muted small truncate">
-                    {`${one.image} · ${usedBy(overview, "resources", one.name)}`}
+                    {`${one.container === "" ? one.image : `container ${one.container}`} · ${usedBy(overview, "resources", one.name)}`}
                   </span>
                 </td>
                 <td class="nowrap row-actions">
@@ -452,12 +453,20 @@ const Resources = (props: {
         value={resource?.name ?? ""}
       />
       <Text
+        hint="Factory starts a container from this image."
         label="Container image"
         mono
         name="image"
         placeholder="postgres:17"
-        required
         value={resource?.image ?? ""}
+      />
+      <Text
+        hint="Or the name of a container that runs already. Factory does not start or stop it: it only lets the sandboxes reach it."
+        label="Existing container"
+        mono
+        name="container"
+        placeholder="my-postgres"
+        value={resource?.container ?? ""}
       />
       <Text
         hint="Agents read this: say what it is for and how to connect."
@@ -484,7 +493,7 @@ const Resources = (props: {
         />
       </div>
       <Text
-        hint="Empty: the command of the image. A saved change starts with the next Start."
+        hint="Empty: the command of the image."
         label="Command"
         mono
         name="command"

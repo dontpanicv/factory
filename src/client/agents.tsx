@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { del, get, post } from "./api.ts";
 import {
   type Agent,
@@ -639,42 +639,95 @@ const AgentEditor = (props: {
   );
 };
 
-/** The agents that do the tasks of a channel, in the channel's head on the board. */
+/**
+ * The agents that do the tasks of a channel, in the channel's head on the board, and a menu to
+ * give the channel to one more agent.
+ */
 export const ChannelAgents = (props: { readonly channel: string }) => {
   const [agents, setAgents] = useState<readonly Agent[] | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new channel can be the first sight of a new agent.
-  useEffect(() => {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  const load = useCallback(() => {
     get<Overview>(FACTORY)
       .then((overview) => setAgents(overview.agents))
       .catch(() => undefined);
-  }, [props.channel]);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new channel can be the first sight of a new agent.
+  useEffect(load, [props.channel]);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
   if (agents === null) {
     return null;
   }
   const here = agents.filter(
     (agent) => agent.enabled && consumes(agent, props.channel)
   );
+  const others = agents.filter((agent) => !consumes(agent, props.channel));
+  const toggle = () => setOpen((now) => !now);
+  const assign = async (event: MouseEvent) => {
+    const name = (event.currentTarget as HTMLButtonElement).value;
+    const agent = agents.find((one) => one.name === name);
+    setOpen(false);
+    if (agent !== undefined) {
+      await post(`${FACTORY}/agents`, {
+        ...agent,
+        channels: [...agent.channels, props.channel],
+      }).catch(() => undefined);
+      load();
+    }
+  };
   return (
-    <span class="col-head__agents">
-      {here.length === 0 ? (
+    <span class="col-head__agents" ref={root}>
+      {here.map((agent) => (
         <a
+          href={`/agents/${agent.name}`}
+          key={agent.name}
+          title={`${agent.name} does the tasks of this channel${agent.description === "" ? "" : `: ${agent.description}`}`}
+        >
+          {agent.name}
+        </a>
+      ))}
+      {others.length === 0 && agents.length > 0 ? null : (
+        <button
+          aria-expanded={open}
+          aria-haspopup="menu"
           class="col-head__assign"
-          href="/agents"
-          title="No agent does the tasks of this channel. Give the channel to an agent."
+          onClick={toggle}
+          title="Give the tasks of this channel to an agent"
+          type="button"
         >
           + agent
-        </a>
-      ) : (
-        here.map((agent) => (
-          <a
-            href={`/agents/${agent.name}`}
-            key={agent.name}
-            title={`${agent.name} does the tasks of this channel${agent.description === "" ? "" : `: ${agent.description}`}`}
-          >
-            {agent.name}
-          </a>
-        ))
+        </button>
       )}
+      {open ? (
+        <div class="menu menu--wide" role="menu">
+          {others.map((agent) => (
+            <button
+              class="menu__item"
+              key={agent.name}
+              onClick={assign}
+              role="menuitem"
+              type="button"
+              value={agent.name}
+            >
+              <span class="truncate">{agent.name}</span>
+            </button>
+          ))}
+          <a class="menu__item" href="/agents/new" role="menuitem">
+            New agent…
+          </a>
+        </div>
+      ) : null}
     </span>
   );
 };

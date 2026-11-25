@@ -69,6 +69,8 @@ export interface Project {
 
 export interface Resource {
   readonly command: string;
+  /** A container that runs already and Factory does not start. */
+  readonly container: string;
   readonly description: string;
   readonly env: string;
   readonly image: string;

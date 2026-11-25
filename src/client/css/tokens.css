@@ -60,3 +60,30 @@
   --content-w: 1280px;
   --gutter: clamp(1.25rem, 3vw, 1.75rem);
 }
+
+/* The dark look: the same design with the inks and the papers changed. It follows the system. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #8f88ff;
+    --accent-hover: #a59fff;
+    --accent-wash: #8f88ff26;
+
+    --ink: #f2f2f4;
+    --paper: #151518;
+    --canvas: #0c0c0e;
+    --muted: #9c9ca8;
+    --line: #ffffff24;
+    --line-strong: #ffffff78;
+    --dot: #2b2b31;
+
+    --ok: #1c4a4e;
+    --ok-ink: #a3e4e8;
+    --warn: #4f3b12;
+    --warn-ink: #ffd294;
+    --bad: #5c1f1b;
+    --bad-ink: #ffaba6;
+    --danger: #ff5f57;
+
+    color-scheme: dark;
+  }
+}

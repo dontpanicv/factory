@@ -6,7 +6,13 @@
     "ultracite/biome/react"
   ],
   "files": {
-    "includes": ["!!**/public/vendor", "!!**/data"]
+    // Skills are vendored code: their authors format them.
+    "includes": [
+      "!!**/public/vendor",
+      "!!**/data",
+      "!!**/.agents/skills",
+      "!!**/.claude/skills"
+    ]
   },
   "javascript": { "globals": ["Bun"] },
   "linter": {

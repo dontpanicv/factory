@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { post, UPLOAD_BYTES_MAX, upload } from "./api.ts";
 import { Clock, Close, ListTodo, Paperclip, Tag } from "./icons.tsx";
 import { parseNeeds } from "./model.ts";
+import { Select } from "./select.tsx";
 
 /**
  * The composer of the Board viewer (`vb inspect`): one outlined box with the textarea and a quiet toolbar.
@@ -148,6 +149,29 @@ const LabelsPanel = (props: {
   );
 };
 
+const TIME = /^([01]?\d|2[0-3]):[0-5]\d$/;
+const TIME_LENGTH = 5;
+const DAYS_AHEAD = 14;
+const NEAR_DAYS = ["today", "tomorrow"];
+
+/** The next days as options: the value is the day as `2026-11-25`. */
+const dayOptions = () =>
+  Array.from({ length: DAYS_AHEAD }, (_, ahead) => {
+    const day = new Date();
+    day.setDate(day.getDate() + ahead);
+    const pad = (part: number) => String(part).padStart(2, "0");
+    return {
+      label:
+        NEAR_DAYS[ahead] ??
+        day.toLocaleDateString(undefined, {
+          day: "numeric",
+          month: "short",
+          weekday: "short",
+        }),
+      value: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`,
+    };
+  });
+
 /** The send-later panel: in a while or at a time, and again every so often. */
 const LaterPanel = (props: {
   readonly onSet: (later: Later | null) => void;
@@ -158,7 +182,10 @@ const LaterPanel = (props: {
     const data = new FormData(event.currentTarget as HTMLFormElement);
     const field = (name: string) => String(data.get(name) ?? "").trim();
     const after = field("in");
-    const at = field("at");
+    const time = field("time");
+    const at = TIME.test(time)
+      ? `${field("day")}T${time.padStart(TIME_LENGTH, "0")}`
+      : "";
     const every = field("every");
     const times = Number(field("times").replace(NOT_DIGITS, ""));
     if (after === "" && at === "" && every === "") {
@@ -187,11 +214,19 @@ const LaterPanel = (props: {
           placeholder="2h"
         />
         <span class="panel__prefix">or at</span>
+        <Select
+          label="Send on this day"
+          name="day"
+          options={dayOptions()}
+          value={dayOptions()[0]?.value ?? ""}
+        />
         <input
-          aria-label="Send at"
+          aria-label="Send at this time"
           class="input mono"
-          name="at"
-          type="datetime-local"
+          data-suggest="composer-later-times"
+          name="time"
+          pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]"
+          placeholder="08:00"
         />
       </div>
       <div class="panel__row">
@@ -227,6 +262,12 @@ const LaterPanel = (props: {
           Set
         </button>
       </div>
+      <datalist id="composer-later-times">
+        <option value="08:00" />
+        <option value="12:00" />
+        <option value="17:00" />
+        <option value="20:00" />
+      </datalist>
       <datalist id="composer-later-in">
         <option value="10m" />
         <option value="1h" />

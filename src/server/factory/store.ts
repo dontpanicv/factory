@@ -348,7 +348,8 @@ export class Store {
         "SELECT config FROM definitions WHERE kind = ? ORDER BY name"
       )
       .all(kind);
-    return rows.map((row) => JSON.parse(row.config));
+    // Decoded again: a definition from before a setting was added gets that setting's default.
+    return rows.map((row) => DECODE[kind](JSON.parse(row.config)));
   }
 
   get<K extends Kind>(kind: K, name: string): Definitions[K] | null {
@@ -357,7 +358,7 @@ export class Store {
         "SELECT config FROM definitions WHERE kind = ? AND name = ?"
       )
       .get(kind, name);
-    return row === null ? null : JSON.parse(row.config);
+    return row === null ? null : DECODE[kind](JSON.parse(row.config));
   }
 
   /** Check a definition and keep it. Throws an Error that says what is wrong. */

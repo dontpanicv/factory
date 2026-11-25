@@ -162,6 +162,17 @@ export const prepare = async (input: {
   const projects = agent.projects.flatMap(
     (name) => store.get("projects", name) ?? []
   );
+  // The tools of an agent are bash and Git: say it plainly when the image has none.
+  const tools = await env.exec(
+    ["sh", "-c", "command -v bash && command -v git"],
+    undefined,
+    context
+  );
+  if (!tools.ok || tools.value.exitCode !== 0) {
+    throw new Error(
+      "The sandbox image has no bash or no git. Use Factory's image, or add them to your image."
+    );
+  }
   await checkout(env, workspace, agent, projects);
   const skills = await skillsOf(env, workspace, agent, store);
   const contexts = files(

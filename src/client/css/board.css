@@ -467,6 +467,24 @@
   border: 1px solid var(--line);
 }
 
+/* An item of a list: its mark hangs to the left of its text. */
+.message__item {
+  display: block;
+  padding-left: 1.4em;
+  text-indent: -1.4em;
+}
+
+.message__mark {
+  display: inline-block;
+  min-width: 1.4em;
+  color: var(--muted);
+  text-indent: 0;
+}
+
+.message__heading {
+  font-weight: 700;
+}
+
 .message__more {
   display: block;
   margin-top: var(--space-1);
@@ -578,13 +596,6 @@
   color: var(--muted);
   background: var(--canvas);
   border: 1px solid var(--line);
-}
-
-/* The dot is at the end of an item, so a line that wraps does not start with a dot. */
-.task-line > *:not(:last-child)::after {
-  margin-left: var(--space-3);
-  color: var(--line-strong);
-  content: "·";
 }
 
 .task-line__note {
@@ -915,10 +926,23 @@
   justify-content: flex-end;
 }
 
-.panel__row .input {
+.panel__row .input,
+.panel__row .dropdown__trigger {
+  height: 1.875rem;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.panel__row .input,
+.panel__row .dropdown {
   flex: 1;
   min-width: 0;
+}
+
+.panel__row .menu__item {
   padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
 

@@ -185,6 +185,8 @@ export const docker = (): SandboxProvider => ({
     await (spec.container === ""
       ? run(["rm", "-f", network])
       : run(["network", "disconnect", network, spec.container]));
+    // The network goes too, when no box is on it.
+    await run(["network", "rm", network]);
   },
   resourceStates: async (specs) => {
     const states = await Promise.all(
@@ -272,6 +274,9 @@ export const docker = (): SandboxProvider => ({
           container,
           "--label",
           "factory=box",
+          // Docker makes the directory when the image has none.
+          "--workdir",
+          "/workspace",
           ...(first === undefined ? [] : ["--network", first]),
           ...envFlags(spec.env),
           image,

@@ -27,6 +27,20 @@ const step = (key: string, active: number, count: number) => {
 };
 
 const MOVES = new Set(["ArrowDown", "ArrowUp", "End", "Home"]);
+/** Letters that come this fast after each other are one word to find. */
+const TYPING_MS = 700;
+
+/** The first option after `from` that has the typed text, or -1. */
+const find = (options: readonly Option[], typed: string, from: number) => {
+  const order = options.map(
+    (_option, index) => (from + 1 + index) % options.length
+  );
+  return (
+    order.find((index) =>
+      options[index]?.label.toLowerCase().includes(typed)
+    ) ?? -1
+  );
+};
 
 /**
  * A dropdown with one value. A hidden input holds the value, so a form reads it by `name` as it
@@ -44,6 +58,7 @@ export const Select = (props: {
   const [above, setAbove] = useState(false);
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
+  const typed = useRef({ at: 0, text: "" });
   const selected = props.options.findIndex((option) => option.value === value);
   useEffect(() => {
     if (!open) {
@@ -73,6 +88,24 @@ export const Select = (props: {
   const toggle = () => (open ? setOpen(false) : show());
   const pick = (event: MouseEvent) =>
     choose((event.currentTarget as HTMLButtonElement).value);
+  /** Type some letters to go to the option that has them. */
+  const seek = (letter: string) => {
+    const now = Date.now();
+    const text =
+      now - typed.current.at < TYPING_MS
+        ? typed.current.text + letter.toLowerCase()
+        : letter.toLowerCase();
+    typed.current = { at: now, text };
+    // While the word grows, the row that has it stays; a new word looks from the next row.
+    const here = open ? active : selected;
+    const found = find(props.options, text, text.length > 1 ? here - 1 : here);
+    if (found >= 0) {
+      if (!open) {
+        show();
+      }
+      setActive(found);
+    }
+  };
   const keys = (event: KeyboardEvent) => {
     if (MOVES.has(event.key)) {
       event.preventDefault();
@@ -86,6 +119,8 @@ export const Select = (props: {
       choose(props.options[active]?.value ?? value);
     } else if (open && (event.key === "Escape" || event.key === "Tab")) {
       setOpen(false);
+    } else if (event.key.length === 1 && !(event.metaKey || event.ctrlKey)) {
+      seek(event.key);
     }
   };
   return (

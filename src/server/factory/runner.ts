@@ -56,6 +56,16 @@ const LIVE_MAX = 1000;
 /** What an agent reads first when a task that it gave to a person comes back to it. */
 const CONTINUED =
   "The task continues: a person gave it back to you. Your sandbox is new: the repositories are fresh checkouts, and files that you did not push are gone. This is the task with its thread as it is now.";
+/** Why a run ended without an answer, for a person. */
+const WHY: Record<string, string> = {
+  interrupted:
+    "Factory stopped while the model answered, and the retries are used up.",
+  no_model:
+    "The agent's model is not available. Check the model and its credentials on the agent's page.",
+  restart_limit: "Factory stopped too many times while the agent worked.",
+  turn_limit:
+    "The agent used all its tool rounds before it had an answer. Give it more rounds on the agent's page, or make the task smaller.",
+};
 /** The states of a run after which the same agent goes on in the same conversation. */
 const GIVEN_BACK: readonly RunState[] = ["blocked", "stopped"];
 
@@ -298,10 +308,31 @@ export const startRunner = async (options: {
       stepsOf(entries)
         .filter((step) => step.failed && step.kind === "say")
         .at(-1)?.text ??
+      WHY["reason" in settled ? String(settled.reason) : ""] ??
       `The agent stopped without an answer (${"reason" in settled ? settled.reason : "unknown"}).`;
     await me.reply(run.taskId, `The run stopped: ${reason}`);
     await held.fail(firstLine(reason));
     end(run.id, "error", reason);
+  };
+
+  /** After a stop of Factory that was longer than the lease, the task is back on the board: the run is over. */
+  const stillMine = async (run: Run, held: Held) => {
+    try {
+      await held.renew(LEASE_SECONDS);
+      return true;
+    } catch {
+      const cutOff =
+        run.conversationId === null
+          ? undefined
+          : await harness.conversation(run.conversationId as never, context);
+      await cutOff?.abort(context);
+      end(
+        run.id,
+        "lost",
+        "The claim on the task ended while Factory did not run. The task went back to the board."
+      );
+      return false;
+    }
   };
 
   const drive = async (run: Run, entry: Live) => {
@@ -318,6 +349,9 @@ export const startRunner = async (options: {
       outcome: null,
       taskId: run.taskId,
     };
+    if (!(await stillMine(run, held))) {
+      return;
+    }
     const renew = async () => {
       try {
         await held.renew(LEASE_SECONDS);

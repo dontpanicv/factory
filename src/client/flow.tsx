@@ -14,6 +14,7 @@ export interface FlowNode {
   readonly kind: "channel" | "end" | "source";
   readonly label: string;
   readonly medianRunMs: number | null;
+  readonly medianWaitMs: number | null;
   readonly open: number;
   readonly total: number;
 }
@@ -31,7 +32,11 @@ export interface Flow {
 }
 
 export interface PlacedNode extends FlowNode {
+  /** How many of its tasks ended there, and how. */
+  readonly ended: { readonly done: number; readonly not: number };
   readonly layer: number;
+  /** Its place in its column, from the top. */
+  readonly row: number;
   readonly x: number;
   readonly y: number;
 }
@@ -46,8 +51,8 @@ export interface PlacedEdge extends FlowEdge {
   readonly width: number;
 }
 
-const NODE_W = 184;
-const NODE_H = 66;
+const NODE_W = 200;
+const NODE_H = 84;
 const COLUMN_GAP = 96;
 const ROW_GAP = 30;
 const PAD = 24;
@@ -127,9 +132,24 @@ const columnsOf = (flow: Flow, out: Map<string, FlowEdge[]>) => {
     const column = node.kind === "end" ? last + 1 : (layer.get(node.id) ?? 0);
     columns[column] = [...(columns[column] ?? []), node];
   }
-  return columns.map((column) =>
+  const sorted = columns.map((column) =>
     (column ?? []).toSorted((a, b) => b.total - a.total)
   );
+  // A source stands at the height of the box that it sends most tasks to, so its line does not cross the others.
+  const [sources = [], next = []] = sorted;
+  const row = (node: FlowNode) => {
+    const [most] = (out.get(node.id) ?? []).toSorted(
+      (a, b) => b.count - a.count
+    );
+    const at = next.findIndex((one) => one.id === most?.to);
+    return at < 0 ? next.length : at;
+  };
+  return [
+    sources.every((node) => node.kind === "source")
+      ? sources.toSorted((a, b) => row(a) - row(b))
+      : sources,
+    ...sorted.slice(1),
+  ];
 };
 
 /** A line from one side of a box to the same side of the other box, through `far`. */
@@ -176,22 +196,23 @@ const line = (
     };
   }
   if (to.layer > from.layer + 1) {
-    const x1 = from.x + NODE_W * 0.75;
     const far = top - reach(lane);
-    if (to.kind !== "end") {
+    const x2 = to.x + NODE_W * 0.25;
+    if (from.row === 0) {
       return {
         back: false,
-        ...arc(x1, from.y, to.x + NODE_W * 0.25, to.y, far),
+        ...arc(from.x + NODE_W * 0.75, from.y, x2, to.y, far),
       };
     }
-    // The ends are in one column: a line comes down to the left side of its end, not through the end above it.
-    const turn = to.x - COLUMN_GAP;
-    const y2 = to.y + NODE_H / 2;
+    // A box below the top of its column: its line leaves at the side and goes up between the columns.
+    const x1 = from.x + NODE_W;
+    const y1 = from.y + NODE_H * 0.25;
+    const turn = x1 + COLUMN_GAP / 2;
     return {
       back: false,
-      labelX: middle(x1, x1, turn, to.x),
-      labelY: middle(from.y, far, far, y2),
-      path: `M${x1},${from.y} C${x1},${far} ${turn},${far} ${to.x},${y2}`,
+      labelX: middle(x1, turn, x2, x2),
+      labelY: middle(y1, far, far, to.y),
+      path: `M${x1},${y1} C${turn},${far} ${x2},${far} ${x2},${to.y}`,
     };
   }
   const x1 = from.x + NODE_W;
@@ -210,7 +231,20 @@ const line = (
  * Put the boxes in columns from left to right, and draw the lines. A line that would make a
  * circle goes back below the boxes, and does not move its box.
  */
-export const layout = (flow: Flow) => {
+export const layout = (all: Flow) => {
+  // The picture has the channels and where their tasks came from. How the tasks of a channel
+  // ended is in its box: lines from each channel to three ends would cover the flow.
+  const flow: Flow = {
+    edges: all.edges.filter((edge) => !edge.to.startsWith("end:")),
+    nodes: all.nodes.filter((node) => node.kind !== "end"),
+  };
+  const ended = (id: string, ...ends: string[]) =>
+    all.edges
+      .filter(
+        (edge) =>
+          edge.from === id && ends.includes(edge.to.slice("end:".length))
+      )
+      .reduce((sum, edge) => sum + edge.count, 0);
   const out = new Map<string, FlowEdge[]>();
   for (const edge of flow.edges) {
     out.set(edge.from, [...(out.get(edge.from) ?? []), edge]);
@@ -240,7 +274,12 @@ export const layout = (flow: Flow) => {
     const offset = (height - (list.length * (NODE_H + ROW_GAP) - ROW_GAP)) / 2;
     return list.map((node, row) => ({
       ...node,
+      ended: {
+        done: ended(node.id, "done"),
+        not: ended(node.id, "failed", "canceled"),
+      },
       layer: index,
+      row,
       x: PAD + index * (NODE_W + COLUMN_GAP),
       y: top + offset + row * (NODE_H + ROW_GAP),
     }));
@@ -273,7 +312,9 @@ const PERIODS = [
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
 ];
-const LABEL_MAX = 22;
+const LABEL_MAX = 26;
+/** A wait of a channel shows in its box when it is this long. */
+const WAIT_SHOWN_MS = 60_000;
 const PERCENT = 100;
 
 const nodeName = (id: string) => {
@@ -284,14 +325,7 @@ const nodeName = (id: string) => {
 const cut = (text: string) =>
   text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text;
 
-const edgeKind = (edge: PlacedEdge) => {
-  if (edge.back) {
-    return "back";
-  }
-  return edge.to === "end:failed" || edge.to === "end:canceled"
-    ? "bad"
-    : "forward";
-};
+const edgeKind = (edge: PlacedEdge) => (edge.back ? "back" : "forward");
 
 const NodeBox = (props: { readonly node: PlacedNode }) => {
   const { node } = props;
@@ -309,8 +343,13 @@ const NodeBox = (props: { readonly node: PlacedNode }) => {
     );
   }
   const facts = [
-    ...node.agents,
-    ...(node.medianRunMs === null ? [] : [`~${duration(node.medianRunMs)}`]),
+    ...(node.agents.length === 0 ? ["people"] : node.agents),
+    ...(node.medianRunMs === null
+      ? []
+      : [`~${duration(node.medianRunMs)} run`]),
+    ...(node.medianWaitMs !== null && node.medianWaitMs >= WAIT_SHOWN_MS
+      ? [`~${duration(node.medianWaitMs)} wait`]
+      : []),
   ];
   return (
     <a
@@ -332,7 +371,15 @@ const NodeBox = (props: { readonly node: PlacedNode }) => {
           {`${node.total} ${node.total === 1 ? "task" : "tasks"}${node.open > 0 ? ` · ${node.open} open` : ""}`}
         </text>
         <text class="flow-node__fact flow-node__fact--agents" x="12" y="56">
-          {cut(facts.length === 0 ? "people" : facts.join(" · "))}
+          {cut(facts.join(" · "))}
+        </text>
+        <text class="flow-node__fact" x="12" y="72">
+          {node.ended.done + node.ended.not === 0
+            ? "none ended yet"
+            : `ended: ${node.ended.done} done`}
+          {node.ended.not === 0 ? null : (
+            <tspan class="flow-node__not">{` · ${node.ended.not} not`}</tspan>
+          )}
         </text>
       </g>
     </a>
@@ -351,7 +398,7 @@ const Graph = (props: { readonly flow: Flow }) => {
         width={placed.width}
       >
         <defs>
-          {["forward", "back", "bad"].map((kind) => (
+          {["forward", "back"].map((kind) => (
             <marker
               class={`flow-arrow flow-arrow--${kind}`}
               id={`arrow-${kind}`}
@@ -405,8 +452,16 @@ const Stat = (props: { readonly label: string; readonly value: string }) => (
 );
 
 const Paths = (props: { readonly flow: Flow }) => {
-  const placed = layout(props.flow);
-  const total = placed.edges.reduce((sum, edge) => sum + edge.count, 0);
+  const rework = new Set(
+    layout(props.flow)
+      .edges.filter((edge) => edge.back)
+      .map((edge) => `${edge.from}>${edge.to}`)
+  );
+  const ways = props.flow.edges.map((edge) => ({
+    ...edge,
+    back: rework.has(`${edge.from}>${edge.to}`),
+  }));
+  const total = ways.reduce((sum, edge) => sum + edge.count, 0);
   return (
     <section class="card">
       <header class="card__head">
@@ -416,7 +471,7 @@ const Paths = (props: { readonly flow: Flow }) => {
       <div class="table-wrap">
         <table class="table">
           <tbody>
-            {placed.edges
+            {ways
               .toSorted((a, b) => b.count - a.count)
               .map((edge) => (
                 <tr key={`${edge.from}>${edge.to}`}>
@@ -526,8 +581,8 @@ export const FlowPage = () => {
             <Graph flow={flow} />
             <p class="flow-legend hint">
               A line is as thick as the number of tasks that went that way. A
-              dashed purple line goes back: rework. A red line ends in a
-              failure. Each box shows its agents and the median time of a run.
+              dashed purple line goes back: rework. Each box shows who does its
+              tasks, the median time of a run, and how its tasks ended.
             </p>
           </section>
           <Paths flow={flow} />

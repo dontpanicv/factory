@@ -3,6 +3,27 @@
  * order of the style sheets, so a rule here that changes a rule of another file is more specific.
  */
 
+/* Thin scroll bars and a plain resize corner, in the inks of the page. */
+* {
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.textarea {
+  resize: vertical;
+}
+
+.textarea::-webkit-resizer {
+  background: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    var(--line-strong) 55% 65%,
+    transparent 65% 75%,
+    var(--line-strong) 75% 85%,
+    transparent 85%
+  );
+}
+
 .fpage {
   max-width: var(--content-w);
   padding: var(--space-5) var(--gutter) var(--space-8);
@@ -238,6 +259,12 @@
 .menu.menu--above {
   top: auto;
   bottom: calc(100% + var(--space-1));
+}
+
+/* A menu of a small button: as wide as its rows, not as the button. */
+.menu.menu--wide {
+  right: auto;
+  min-width: 200px;
 }
 
 .menu.menu--fixed {
@@ -596,6 +623,7 @@
 }
 
 .col-head__agents {
+  position: relative;
   display: flex;
   flex-shrink: 0;
   gap: var(--space-1);
@@ -613,9 +641,19 @@
 }
 
 .col-head__agents .col-head__assign {
+  padding: 1px 6px;
+  font: inherit;
   color: var(--muted);
+  cursor: pointer;
   background: none;
   border: 1px dashed var(--line-strong);
+}
+
+.col-head__agents .col-head__assign:hover,
+.col-head__agents .col-head__assign[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: var(--ink);
+  border-style: solid;
 }
 
 /* The flow. */
@@ -675,21 +713,12 @@
   stroke-dasharray: 7 5;
 }
 
-.flow-edge--bad {
-  stroke: var(--danger);
-  stroke-opacity: 0.55;
-}
-
 .flow-arrow path {
   fill: var(--ink);
 }
 
 .flow-arrow--back path {
   fill: var(--accent);
-}
-
-.flow-arrow--bad path {
-  fill: var(--danger);
 }
 
 .flow-node rect {
@@ -718,6 +747,10 @@
   fill: var(--muted);
 }
 
+.flow-node .flow-node__not {
+  fill: var(--danger);
+}
+
 .flow-node .flow-node__fact--agents {
   fill: var(--accent);
 }
@@ -737,25 +770,10 @@ a:hover > .flow-node .flow-node__shadow {
   stroke-dasharray: 5 4;
 }
 
-.flow-node--source .flow-node__title,
-.flow-node--end .flow-node__title {
+.flow-node--source .flow-node__title {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   text-anchor: middle;
-}
-
-.flow-node--end rect {
-  fill: var(--ink);
-}
-
-.flow-node--end .flow-node__title {
-  fill: var(--paper);
-}
-
-.flow-node--failed rect,
-.flow-node--canceled rect {
-  fill: var(--danger);
-  stroke: var(--danger);
 }
 
 .flow-count rect {
@@ -780,10 +798,6 @@ a:hover > .flow-node .flow-node__shadow {
   fill: var(--accent);
 }
 
-.flow-count--bad rect {
-  stroke: var(--danger);
-}
-
 @media (max-width: 900px) {
   .split,
   .editor {
@@ -804,6 +818,11 @@ a:hover > .flow-node .flow-node__shadow {
 
   .fields--model {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  /* A narrow channel head has room for its name and its Threads and Tasks switch only. */
+  .col-head__agents {
+    display: none;
   }
 
   /* The facts of a run as rows: a name, then its value. */

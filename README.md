@@ -95,9 +95,15 @@ does, and what its sandbox gets.
   tasks, reply, make a task in another channel (`board_task`), give its task to a person (`task_block`) or fail
   it (`task_fail`). A task with the label `factory.agent=<name>` is only for that agent.
 - **Schedules.** A schedule (cron, with a time zone) makes a task for its agent: "each day at 08:00, check the
-  logs". The run then shows on the board as each other task.
+  logs". The run then shows on the board as each other task. A schedule that was due while Factory did not run
+  fires one time at the start.
+- **Chains.** A task that an agent makes knows how long its chain of agents' tasks is. At 12 the chain stops, and
+  the agent gives the work to a person.
 - **Durable.** A run continues after a restart of Factory, in the same sandbox. A tool call that the restart cut
-  off is not run again: the model sees that it was interrupted, and decides.
+  off is not run again: the model sees that it was interrupted, and decides. After a stop that is longer than
+  the lease of a task (3 minutes), the task goes back to the board and an agent takes it again.
+- **Given back.** When a person answers a task that an agent gave to them, the agent goes on in the same
+  conversation, in a new sandbox.
 - **Audit.** A task's pane shows its runs. A run's page shows each step in one line: what the agent said, each
   tool call, and the output of a call when you open it.
 
@@ -108,10 +114,13 @@ does, and what its sandbox gets.
   repository goes into the agent's instructions, and the skills in `.agents/skills` are found without a setting.
 - **Shared resources**: containers that run one time for all sandboxes (PostgreSQL, Elasticsearch, an OIDC
   server). Each has its own network, and a sandbox joins only the networks of its agent's resources. The name of
-  a resource is its host name.
+  a resource is its host name. A resource can also be a container that runs already: Factory then only lets the
+  sandboxes reach it.
 - **Skills**: instructions for one kind of work, written in Factory or uploaded as `SKILL.md`. An agent sees the
   name and the description of its skills, and reads a skill when a task needs it.
 - **Secrets**: credentials by the name of an environment variable. A sandbox gets only the secrets of its agent.
+  The values are sealed in the database (AES-256-GCM) with `FACTORY_SECRET_KEY`, or with a key file that Factory
+  makes in the data directory.
 
 **Models.** A provider key is a secret with the provider's variable name (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
 A subscription uses a login of this computer: for ChatGPT the login of the Codex CLI (`codex login`,
@@ -119,8 +128,8 @@ A subscription uses a login of this computer: for ChatGPT the login of the Codex
 
 **Sandboxes.** `SandboxProvider` (`src/server/factory/sandbox.ts`) is the only part that knows Docker: it starts
 a box with the pi-env daemon in it, and starts shared resources. Another provider (a VM, a remote host) needs
-only these methods. The default image `factory-sandbox:1` is built on first use (Debian with git, curl, ripgrep,
-jq); an agent can name another image.
+only these methods. The default image `factory-sandbox:2` is built on first use (Debian with git, curl, ripgrep,
+jq, Python and Bun); an agent can name another image, which needs bash and git.
 
 **Flow** shows how tasks move: a box for each channel, a line for each way that tasks went, as thick as the
 number of tasks. A line that goes back to an earlier channel is rework.
