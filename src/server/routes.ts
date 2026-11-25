@@ -3,6 +3,8 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Auth } from "./auth/auth.ts";
 import { Board } from "./board.ts";
 import { Settings } from "./config.ts";
+import { FACTORY_PATH, handle } from "./factory/api.ts";
+import { Factory } from "./factory/factory.ts";
 
 /** The REST API: the board's own API, the session, and the Better Auth endpoints. */
 
@@ -37,6 +39,27 @@ const boardApi = Effect.gen(function* () {
   }
   return HttpServerResponse.fromWeb(
     yield* Effect.promise(() => board.fetch(web))
+  );
+});
+
+/** Factory's own API: the agents and what they need. Only for a signed-in person. */
+const factoryApi = Effect.gen(function* () {
+  const auth = yield* Auth;
+  const factory = yield* Factory;
+  const settings = yield* Settings;
+  const web = yield* toWeb(yield* HttpServerRequest.HttpServerRequest);
+  if (crossOrigin(web, settings.baseUrl)) {
+    return forbidden("Cross-origin requests are not allowed.");
+  }
+  const user = yield* auth.currentUser(web.headers);
+  if (user === null) {
+    return HttpServerResponse.jsonUnsafe(
+      { error: { code: "unauthorized", message: "Sign in first." } },
+      { status: 401 }
+    );
+  }
+  return HttpServerResponse.fromWeb(
+    yield* Effect.promise(() => handle(factory, web, user.name))
   );
 });
 
@@ -110,6 +133,8 @@ const googleSignIn = Effect.gen(function* () {
 export const Routes = Layer.mergeAll(
   HttpRouter.add("*", "/api/board", boardApi),
   HttpRouter.add("*", "/api/board/*", boardApi),
+  HttpRouter.add("*", FACTORY_PATH, factoryApi),
+  HttpRouter.add("*", `${FACTORY_PATH}/*`, factoryApi),
   HttpRouter.add("GET", "/api/session", session),
   HttpRouter.add("*", "/api/auth/*", betterAuth),
   HttpRouter.add("GET", "/login/google", googleSignIn)

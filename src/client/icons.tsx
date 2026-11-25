@@ -6,8 +6,8 @@ const Icon = (props: { readonly children: preact.ComponentChildren }) => (
     fill="none"
     height="14"
     stroke="currentColor"
-    strokeLinecap="square"
-    strokeWidth="2"
+    // Preact writes SVG attributes as they are named here, so the stroke is set as CSS.
+    style={{ strokeLinecap: "square", strokeWidth: 2 }}
     viewBox="0 0 24 24"
     width="14"
   >
@@ -51,7 +51,7 @@ export const Close = () => (
     fill="none"
     height="11"
     stroke="currentColor"
-    strokeWidth="2"
+    style={{ strokeWidth: 2 }}
     viewBox="0 0 24 24"
     width="11"
   >

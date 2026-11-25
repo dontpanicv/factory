@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
+import { AgentsPage } from "./agents.tsx";
 import {
   type BoardData,
   BoardMain,
@@ -8,6 +9,7 @@ import {
   type Run,
 } from "./board.tsx";
 import type { Sent } from "./composer.tsx";
+import { FlowPage } from "./flow.tsx";
 import {
   type BoardQuery,
   boardHref,
@@ -16,6 +18,8 @@ import {
 } from "./model.ts";
 import { loadThread, type ThreadData, ThreadPane } from "./pane.tsx";
 import { followLink, navigate, useUrl } from "./route.ts";
+import { RunPage } from "./run.tsx";
+import { SetupPage } from "./setup.tsx";
 
 const TICK_MS = 15_000;
 /** Board events come in bursts (a task and its reply): one reload for each burst. */
@@ -299,7 +303,20 @@ const signOut = async () => {
   location.assign("/login");
 };
 
-const Header = (props: { readonly user: User }) => (
+const PAGES = [
+  { href: "/board", title: "Board" },
+  { href: "/agents", title: "Agents" },
+  { href: "/flow", title: "Flow" },
+  { href: "/setup", title: "Setup" },
+];
+
+/** The page of an address: `/agents/sre` is `agents` with `sre`. A run's log belongs to Agents. */
+const pageOf = (pathname: string) => {
+  const [page = "board", item = null] = pathname.split("/").filter(Boolean);
+  return { item: item === null ? null : decodeURIComponent(item), page };
+};
+
+const Header = (props: { readonly page: string; readonly user: User }) => (
   <header class="header">
     <div class="header__inner">
       <a class="brand" href="/board">
@@ -307,9 +324,19 @@ const Header = (props: { readonly user: User }) => (
         Factory
       </a>
       <nav class="nav">
-        <a aria-current="page" href="/board">
-          Board
-        </a>
+        {PAGES.map((page) => (
+          <a
+            aria-current={
+              page.href === `/${props.page === "runs" ? "agents" : props.page}`
+                ? "page"
+                : undefined
+            }
+            href={page.href}
+            key={page.href}
+          >
+            {page.title}
+          </a>
+        ))}
       </nav>
       <div class="header__end">
         <span class="label header__email">{props.user.email}</span>
@@ -334,8 +361,33 @@ const Header = (props: { readonly user: User }) => (
   </header>
 );
 
+/** The pages of the agents. */
+const Pages = (props: {
+  readonly item: string | null;
+  readonly page: string;
+}) => {
+  const now = useNow();
+  if (props.page === "runs" && props.item !== null) {
+    return <RunPage id={props.item} key={props.item} now={now} />;
+  }
+  if (props.page === "flow") {
+    return <FlowPage />;
+  }
+  if (props.page === "setup") {
+    return <SetupPage tab={props.item} />;
+  }
+  return <AgentsPage name={props.item} now={now} />;
+};
+
 export const App = () => {
   const url = useUrl();
+  const { item, page } = pageOf(url.pathname);
+  useEffect(() => {
+    const title = PAGES.find(
+      (one) => one.href === `/${page === "runs" ? "agents" : page}`
+    )?.title;
+    document.title = `${title ?? "Factory"} · Factory`;
+  }, [page]);
   const [session, setSession] = useState<Session | null>(null);
   useEffect(() => {
     fetch("/api/session")
@@ -371,10 +423,16 @@ export const App = () => {
   return (
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: the links inside handle the keys; this only routes their clicks.
     <div class="app" onClick={followLink}>
-      <Header user={user} />
-      <main class="board-shell">
-        <Board query={boardQuery(url)} user={user.name} />
-      </main>
+      <Header page={page} user={user} />
+      {page === "board" ? (
+        <main class="board-shell">
+          <Board query={boardQuery(url)} user={user.name} />
+        </main>
+      ) : (
+        <main class="shell">
+          <Pages item={item} page={page} />
+        </main>
+      )}
     </div>
   );
 };

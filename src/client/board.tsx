@@ -1,6 +1,7 @@
 import type { MessageView, ThreadSummaryView } from "@vercel/board";
 import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { ChannelAgents } from "./agents.tsx";
 import { get, post } from "./api.ts";
 import { Composer, type Sent } from "./composer.tsx";
 import { Avatar, Labels, Message, StateMark, Timeline } from "./message.tsx";
@@ -423,6 +424,9 @@ const MainHead = (props: {
       </button>
       <h1 class="col-head__title">{title}</h1>
       <span class="col-head__meta truncate">{meta}</span>
+      {canSwitch && query.channel !== null ? (
+        <ChannelAgents channel={query.channel} />
+      ) : null}
       <span class="spacer" />
       {canSwitch ? (
         <nav aria-label="Channel view" class="switch">

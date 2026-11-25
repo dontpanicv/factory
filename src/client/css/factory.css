@@ -1,0 +1,550 @@
+/*
+ * The pages of Factory's agents: Agents, Setup, Flow and the run log. The bundle does not keep the
+ * order of the style sheets, so a rule here that changes a rule of another file is more specific.
+ */
+
+.fpage {
+  max-width: var(--content-w);
+  padding: var(--space-5) var(--gutter) var(--space-8);
+  margin: 0 auto;
+}
+
+.fpage--narrow {
+  max-width: 920px;
+}
+
+.shell {
+  height: calc(100dvh - var(--header-h));
+  overflow-y: auto;
+  background: var(--canvas);
+}
+
+.page-head.page-head.page-head--tight {
+  margin-bottom: 0;
+}
+
+.title.title.title--small {
+  font-size: var(--text-xl);
+  letter-spacing: -0.03em;
+}
+
+.eyebrow a {
+  color: var(--ink);
+}
+
+/* A list of things at the left, the open one at the right. */
+.split {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.list {
+  position: sticky;
+  top: var(--space-5);
+  display: grid;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-2);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
+}
+
+.list__item:last-child {
+  border-bottom: none;
+}
+
+.list__item:hover {
+  background: var(--accent-wash);
+}
+
+.list__item[aria-current="page"] {
+  background: var(--accent-wash);
+  border-left-color: var(--accent);
+}
+
+.list__name {
+  font-family: var(--font-mono);
+  font-weight: 650;
+}
+
+.list__note {
+  grid-column: 1 / -1;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.list__item--new {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.fields__wide {
+  grid-column: span 2;
+}
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.check {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.checks .check {
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+  border: 1px solid var(--line-strong);
+}
+
+.checks .check:has(input:checked) {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+}
+
+.check input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.schedule {
+  display: grid;
+  grid-template-columns: 150px 170px minmax(140px, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+}
+
+.schedule__text,
+.schedule__end {
+  grid-column: 1 / -1;
+}
+
+.schedule__end {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.schedule__end .hint {
+  margin-right: auto;
+}
+
+.card .textarea {
+  min-height: 140px;
+}
+
+.card .empty {
+  padding: var(--space-5) var(--space-4);
+}
+
+.card__head .hint {
+  min-width: 0;
+}
+
+/* Setup: the list of definitions, and the form of the open one. */
+.editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.row-actions {
+  text-align: right;
+}
+
+.row-actions .button + .button {
+  margin-left: var(--space-2);
+}
+
+.switch button {
+  padding: 3px var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  color: var(--muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.switch button + button {
+  border-left: 1px solid var(--line-strong);
+}
+
+.switch button[aria-pressed="true"] {
+  color: var(--paper);
+  background: var(--ink);
+}
+
+/* A run and its log. */
+.run-title {
+  display: block;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.run-title:hover {
+  text-decoration: underline;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-1) var(--space-5);
+  margin: 0;
+}
+
+.facts dt {
+  grid-row: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-chrome);
+}
+
+.facts dd {
+  grid-row: 2;
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.steps {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.step:last-child {
+  border-bottom: none;
+}
+
+.step__time {
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.step__text {
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.step--say {
+  background: var(--accent-wash);
+}
+
+.step--failed.step--say {
+  color: var(--bad-ink);
+  background: color-mix(in srgb, var(--bad) 18%, var(--paper));
+}
+
+.step__tool summary {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  list-style: none;
+}
+
+.step__tool summary::-webkit-details-marker {
+  display: none;
+}
+
+.step__tool summary code {
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.step__name {
+  flex-shrink: 0;
+  min-width: 92px;
+  font-family: var(--font-mono);
+  font-weight: 650;
+}
+
+.step__flag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--bad-ink);
+  text-transform: uppercase;
+  background: var(--bad);
+}
+
+.step__tool .log {
+  max-height: 320px;
+  margin-top: var(--space-2);
+}
+
+/* The runs of a task, in the thread's pane. */
+.task-runs {
+  margin: var(--space-3) calc(-1 * var(--space-5)) calc(-1 * var(--space-2));
+  border-top: 1px solid var(--line);
+}
+
+.task-runs .table td {
+  padding: var(--space-2) var(--space-2);
+}
+
+.task-runs .table td:first-child {
+  padding-left: var(--space-5);
+}
+
+.avatar.avatar.avatar--agent {
+  color: var(--paper);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.col-head__agents {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.col-head__agents a {
+  padding: 1px 6px;
+  color: var(--paper);
+  text-decoration: none;
+  background: var(--accent);
+}
+
+.col-head__agents .col-head__assign {
+  color: var(--muted);
+  background: none;
+  border: 1px dashed var(--line-strong);
+}
+
+/* The flow. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.stat {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-right: 1px solid var(--line);
+}
+
+.stat:last-child {
+  border-right: none;
+}
+
+.flow-graph {
+  padding: var(--space-2);
+  overflow-x: auto;
+  background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* A wide flow gets smaller to fit, but stays readable: below that size it scrolls. */
+.flow-graph svg {
+  display: block;
+  min-width: min(100%, 900px);
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.flow-legend {
+  padding: var(--space-3) var(--space-4);
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.flow-edge {
+  fill: none;
+  stroke: var(--ink);
+  stroke-opacity: 0.38;
+}
+
+.flow-edge:hover {
+  stroke-opacity: 0.9;
+}
+
+.flow-edge--back {
+  stroke: var(--accent);
+  stroke-opacity: 0.75;
+  stroke-dasharray: 7 5;
+}
+
+.flow-edge--bad {
+  stroke: var(--danger);
+  stroke-opacity: 0.55;
+}
+
+.flow-arrow path {
+  fill: var(--ink);
+}
+
+.flow-arrow--back path {
+  fill: var(--accent);
+}
+
+.flow-arrow--bad path {
+  fill: var(--danger);
+}
+
+.flow-node rect {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.flow-node .flow-node__shadow {
+  fill: var(--ink);
+  stroke: none;
+}
+
+.flow-node text {
+  font-family: var(--font-mono);
+  fill: var(--ink);
+}
+
+.flow-node__title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.flow-node__fact {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.flow-node .flow-node__fact--agents {
+  fill: var(--accent);
+}
+
+a:hover > .flow-node rect:not(.flow-node__shadow) {
+  fill: var(--accent-wash);
+}
+
+.flow-node--source rect {
+  fill: var(--canvas);
+  stroke-dasharray: 5 4;
+}
+
+.flow-node--source .flow-node__title,
+.flow-node--end .flow-node__title {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-anchor: middle;
+}
+
+.flow-node--end rect {
+  fill: var(--ink);
+}
+
+.flow-node--end .flow-node__title {
+  fill: var(--paper);
+}
+
+.flow-node--failed rect,
+.flow-node--canceled rect {
+  fill: var(--danger);
+  stroke: var(--danger);
+}
+
+.flow-count rect {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+
+.flow-count text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  fill: var(--ink);
+}
+
+.flow-count--back rect {
+  stroke: var(--accent);
+}
+
+.flow-count--back text {
+  fill: var(--accent);
+}
+
+.flow-count--bad rect {
+  stroke: var(--danger);
+}
+
+@media (max-width: 900px) {
+  .split,
+  .editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .list {
+    position: static;
+  }
+
+  .schedule {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fields__wide {
+    grid-column: auto;
+  }
+
+  .page-head.page-head--tight {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+}

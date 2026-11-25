@@ -1,8 +1,9 @@
 # Factory
 
-A personal software factory. It starts with the **Board**: a [Vercel Board](https://vercel.com/docs/board)
-(`@vercel/board`) that Factory keeps itself in SQLite, with no Vercel service, and a single-page UI on it.
-One Bun process serves the SPA and the REST API.
+A personal software factory. People and agents work together on a **Board**: a
+[Vercel Board](https://vercel.com/docs/board) (`@vercel/board`) that Factory keeps itself in SQLite, with no Vercel
+service. **Agents** take the tasks of their channels, work in sandboxes, and hand work to other channels.
+One Bun process serves the SPA and the REST API, and runs the agents.
 
 ## Stack
 
@@ -12,6 +13,8 @@ One Bun process serves the SPA and the REST API.
 | Server | [Effect](https://effect.website) 4 (`effect/http` router on `@effect/platform-bun`) |
 | Database | SQLite: `@effect/sql-sqlite-bun` with migrations (`src/server/db.ts`), file `<FACTORY_DATA_DIR>/factory.sqlite` |
 | Board | `@vercel/board` with the `local()` backend: SQLite at `<FACTORY_DATA_DIR>/board/local.db` |
+| Agents | [Pi Durable](https://github.com/earendil-works/pi) (`@earendil-works/pi-durable`): the model loop in the Factory process, stored in `<FACTORY_DATA_DIR>/agents.sqlite` |
+| Sandboxes | Docker containers, reached through `@earendil-works/pi-env` |
 | Sign-in | [Better Auth](https://better-auth.com) with Google, or local mode |
 | UI | Preact SPA (`src/client`), bundled by Bun's HTML imports, Factory design tokens (`src/client/css`) |
 | Quality | TypeScript (`tsc --noEmit`), Biome via Ultracite, lefthook pre-commit |
@@ -25,7 +28,11 @@ src/server/board.ts     the board: local() backend, the person from the Factory 
 src/server/auth/        Better Auth + Google sign-in, Google group check, local mode
 src/server/config.ts    settings from the environment (.env.example)
 src/server/db.ts        SQLite and its migrations
-src/client/             the SPA: board.tsx (sidebar, feeds, tasks), composer.tsx, message.tsx, pane.tsx (thread pane)
+src/server/factory/     the agents: store.ts (definitions, secrets, runs), runner.ts (tasks to agents, schedules),
+                        sandbox.ts (the sandbox provider), workspace.ts (checkouts, skills), tools.ts (board tools),
+                        models.ts (model credentials), flow.ts, api.ts (/api/factory)
+src/client/             the SPA: board.tsx (sidebar, feeds, tasks), composer.tsx, message.tsx, pane.tsx (thread pane),
+                        agents.tsx, setup.tsx, flow.tsx, run.tsx
 test/                   bun test
 ```
 
@@ -34,6 +41,11 @@ test/                   bun test
 - `/api/board/*` is the board's own HTTP API ([reference](node_modules/@vercel/board/docs/04-reference/03-http.md)):
   channels, threads, messages, tasks and their states, the event feed (SSE). The SPA calls it directly. The board
   knows the person from the Factory session; a request without one gets 401.
+- `/api/factory`: the agents. `GET /api/factory` is all definitions with their state. `POST /api/factory/<kind>`
+  saves a definition and `DELETE /api/factory/<kind>/<name>` removes it (`agents`, `projects`, `resources`,
+  `skills`). `POST /api/factory/secrets` sets a secret; no endpoint answers a secret's value.
+  `GET /api/factory/runs` and `/runs/<id>` are the runs and their logs, `POST /runs/<id>/stop` stops one, and
+  `GET /api/factory/flow?days=30` is the flow.
 - `GET /api/session`: the signed-in person, or 401 with the sign-in mode.
 - `/api/auth/*`: Better Auth. `GET /login/google` starts the Google sign-in.
 
@@ -64,6 +76,49 @@ prefix/>`, `?thread=<id>` for the pane, and `/board/tasks/<id>` as a task's perm
 board event (`/api/board/events`, SSE).
 
 The Board skill for coding agents is in `.agents/skills/board` (`bunx skills add vercel/board --skill board`).
+
+## Agents
+
+An agent is defined on the **Agents** page: its role and instructions, its model, the channels whose tasks it
+does, and what its sandbox gets.
+
+- **Brain and hands.** The agent itself is a Pi Durable conversation in the Factory process: the model calls, the
+  transcript and the board tools. Its coding tools (`read`, `write`, `edit`, `bash`) run in a sandbox, through a
+  pi-env daemon. Factory's own secrets and the board's credentials never enter a sandbox.
+- **Tasks.** When a task is ready in a channel of an agent, the agent claims it, gets a new sandbox, and works. Its
+  last answer is posted to the thread and completes the task. With the board tools it can read threads, list
+  tasks, reply, make a task in another channel (`board_task`), give its task to a person (`task_block`) or fail
+  it (`task_fail`). A task with the label `factory.agent=<name>` is only for that agent.
+- **Schedules.** A schedule (cron, with a time zone) makes a task for its agent: "each day at 08:00, check the
+  logs". The run then shows on the board as each other task.
+- **Durable.** A run continues after a restart of Factory, in the same sandbox. A tool call that the restart cut
+  off is not run again: the model sees that it was interrupted, and decides.
+- **Audit.** A task's pane shows its runs. A run's page shows each step in one line: what the agent said, each
+  tool call, and the output of a call when you open it.
+
+**Setup** has what agents work with:
+
+- **Projects**: Git repositories. Each project of an agent is checked out in its sandbox at
+  `/workspace/<name>`. A token (a secret) lets Git read a private repository and push. `AGENTS.md` of a
+  repository goes into the agent's instructions, and the skills in `.agents/skills` are found without a setting.
+- **Shared resources**: containers that run one time for all sandboxes (PostgreSQL, Elasticsearch, an OIDC
+  server). Each has its own network, and a sandbox joins only the networks of its agent's resources. The name of
+  a resource is its host name.
+- **Skills**: instructions for one kind of work, written in Factory or uploaded as `SKILL.md`. An agent sees the
+  name and the description of its skills, and reads a skill when a task needs it.
+- **Secrets**: credentials by the name of an environment variable. A sandbox gets only the secrets of its agent.
+
+**Models.** A provider key is a secret with the provider's variable name (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
+A subscription uses a login of this computer: for ChatGPT the login of the Codex CLI (`codex login`,
+`~/.codex/auth.json`), for other providers Pi's (`pi`, then `/login`).
+
+**Sandboxes.** `SandboxProvider` (`src/server/factory/sandbox.ts`) is the only part that knows Docker: it starts
+a box with the pi-env daemon in it, and starts shared resources. Another provider (a VM, a remote host) needs
+only these methods. The default image `factory-sandbox:1` is built on first use (Debian with git, curl, ripgrep,
+jq); an agent can name another image.
+
+**Flow** shows how tasks move: a box for each channel, a line for each way that tasks went, as thick as the
+number of tasks. A line that goes back to an earlier channel is rework.
 
 ## Run
 

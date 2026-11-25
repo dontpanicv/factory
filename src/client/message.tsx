@@ -8,6 +8,7 @@ import {
   continues,
   dayLabel,
   initialOf,
+  isAgent,
   STATE_LABEL,
   STATE_MARK,
   sameDay,
@@ -41,12 +42,14 @@ export const Linked = (props: { readonly text: string }) => {
 };
 
 export const Avatar = (props: {
+  /** An agent of Factory has a filled avatar. */
+  readonly agent?: boolean;
   readonly name: string;
   readonly small?: boolean;
 }) => (
   <span
     aria-hidden="true"
-    class={props.small === true ? "avatar avatar--small" : "avatar"}
+    class={`avatar${props.small === true ? "avatar--small" : ""}${props.agent === true ? "avatar--agent" : ""}`}
   >
     {initialOf(props.name)}
   </span>
@@ -134,15 +137,51 @@ export const TaskLine = (props: {
   );
 };
 
+/** Factory's own labels as words: where a task came from, and which agent it is for. */
+const FactoryLabel = (props: {
+  readonly name: string;
+  readonly query: BoardQuery | undefined;
+  readonly value: string;
+}) => {
+  if (props.name === "factory.from") {
+    return (
+      <a
+        class="tag tag--muted"
+        href={
+          props.query === undefined
+            ? `/board/tasks/${props.value}`
+            : boardHref(props.query, { thread: props.value })
+        }
+        title="The task that this task came from"
+      >{`from #${props.value}`}</a>
+    );
+  }
+  return (
+    <span class="tag tag--muted">
+      {props.name === "factory.agent" ? `for ${props.value}` : "scheduled"}
+    </span>
+  );
+};
+
 export const Labels = (props: {
   readonly labels: Readonly<Record<string, string>>;
+  readonly query?: BoardQuery;
 }) => {
   const labels = visibleLabels(props.labels);
   return labels.length === 0 ? null : (
     <div class="labels">
-      {labels.map(([key, value]) => (
-        <span class="tag" key={key}>{`${key}=${value}`}</span>
-      ))}
+      {labels.map(([key, value]) =>
+        key.startsWith("factory.") ? (
+          <FactoryLabel
+            key={key}
+            name={key}
+            query={props.query}
+            value={value}
+          />
+        ) : (
+          <span class="tag" key={key}>{`${key}=${value}`}</span>
+        )
+      )}
     </div>
   );
 };
@@ -208,7 +247,7 @@ export const Message = (props: {
             {time}
           </time>
         ) : (
-          <Avatar name={name} />
+          <Avatar agent={isAgent(message.by.actor)} name={name} />
         )}
       </div>
       <div class="message__body">
@@ -246,7 +285,7 @@ export const Message = (props: {
         props.taskLine === false ? null : (
           <TaskLine now={now} query={props.query} task={message.task} />
         )}
-        <Labels labels={message.labels} />
+        <Labels labels={message.labels} query={props.query} />
         {props.replies === undefined ||
         props.replies.count === 0 ||
         props.href === null ? null : (

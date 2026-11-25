@@ -104,10 +104,18 @@ export const actorName = (actor: string | null | undefined) => {
   if (actor === null || actor === undefined) {
     return "—";
   }
+  if (actor.startsWith(AGENT_PRINCIPAL)) {
+    return actor.slice(AGENT_PRINCIPAL.length);
+  }
   return actor.startsWith("board:")
     ? "Factory"
     : actor.replace(USER_PRINCIPAL, "");
 };
+
+/** An agent of Factory writes to the board as `board:client:<its name>`. */
+const AGENT_PRINCIPAL = "board:client:";
+export const isAgent = (actor: string | null | undefined) =>
+  actor?.startsWith(AGENT_PRINCIPAL) === true;
 
 /** The labels that people set and read; the board's own labels stay hidden. */
 export const visibleLabels = (labels: Readonly<Record<string, string>>) =>

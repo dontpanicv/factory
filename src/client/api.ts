@@ -13,7 +13,7 @@ export class ApiError extends Error {
 export const BOARD_API = "/api/board";
 
 const call = async <A>(
-  method: "GET" | "POST",
+  method: "DELETE" | "GET" | "POST",
   path: string,
   body?: unknown
 ): Promise<A> => {
@@ -85,3 +85,5 @@ export const upload = async (file: File) => {
   }
   return json.attachment.id;
 };
+
+export const del = (path: string) => call<unknown>("DELETE", path);

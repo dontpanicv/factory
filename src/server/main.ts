@@ -6,6 +6,7 @@ import { AuthLive } from "./auth/auth.ts";
 import { BoardLive } from "./board.ts";
 import { Settings, SettingsLive } from "./config.ts";
 import { DatabaseLive } from "./db.ts";
+import { FactoryLive } from "./factory/factory.ts";
 import { Routes } from "./routes.ts";
 
 /** Bun closes idle connections after this many seconds. The board's event stream pings every 15 seconds. */
@@ -27,7 +28,18 @@ const HttpLive = Layer.unwrap(
           hostname: "127.0.0.1",
           idleTimeout: IDLE_TIMEOUT_SECONDS,
           port: settings.port,
-          routes: { "/": spa, "/board": spa, "/board/*": spa, "/login": spa },
+          routes: {
+            "/": spa,
+            "/agents": spa,
+            "/agents/*": spa,
+            "/board": spa,
+            "/board/*": spa,
+            "/flow": spa,
+            "/login": spa,
+            "/runs/*": spa,
+            "/setup": spa,
+            "/setup/*": spa,
+          },
         })
       )
     );
@@ -35,7 +47,8 @@ const HttpLive = Layer.unwrap(
 );
 
 HttpLive.pipe(
-  Layer.provide(BoardLive),
+  Layer.provide(FactoryLive),
+  Layer.provideMerge(BoardLive),
   Layer.provideMerge(AuthLive),
   Layer.provide(DatabaseLive),
   Layer.provide(Layer.mergeAll(SettingsLive, BunServices.layer)),

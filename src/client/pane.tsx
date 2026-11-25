@@ -14,6 +14,7 @@ import {
   type TaskState,
   titleOf,
 } from "./model.ts";
+import { TaskRuns } from "./run.tsx";
 
 const REPLY_LIMIT = 500;
 /** A person's claim to complete a task: only long enough for the complete that follows it. */
@@ -288,6 +289,7 @@ const TaskCard = (props: {
         ) : null}
       </dl>
       <TaskActions root={root} run={props.run} />
+      <TaskRuns now={props.now} stamp={props.data} taskId={root.id} />
     </section>
   );
 };
