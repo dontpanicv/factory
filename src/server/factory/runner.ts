@@ -21,9 +21,9 @@ import {
   type Agent,
   consumes,
   nextRun,
-  parseEnv,
   type Run,
   type RunState,
+  resourceSpec,
   type Store,
 } from "./store.ts";
 import { boardTools, type RunContext } from "./tools.ts";
@@ -53,6 +53,11 @@ const EVENT_SETTLE_MS = 250;
 const THREAD_LIMIT = 200;
 const RESULT_MAX = 200;
 const LIVE_MAX = 1000;
+/** What an agent reads first when a task that it gave to a person comes back to it. */
+const CONTINUED =
+  "The task continues: a person gave it back to you. Your sandbox is new: the repositories are fresh checkouts, and files that you did not push are gone. This is the task with its thread as it is now.";
+/** The states of a run after which the same agent goes on in the same conversation. */
+const GIVEN_BACK: readonly RunState[] = ["blocked", "stopped"];
 
 export interface Runner {
   readonly close: () => Promise<void>;
@@ -147,15 +152,7 @@ export const startRunner = async (options: {
     );
     await Promise.all(
       resources.map((resource) =>
-        provider.resourceUp({
-          command: resource.command,
-          env: {
-            ...parseEnv(resource.env),
-            ...store.secrets(resource.secrets),
-          },
-          image: resource.image,
-          name: resource.name,
-        })
+        provider.resourceUp(resourceSpec(resource, store))
       )
     );
     const box = await provider.start({
@@ -214,25 +211,40 @@ export const startRunner = async (options: {
     const thread = await runContext.me.thread(run.taskId, {
       limit: THREAD_LIMIT,
     });
-    const conversation = await harness.createConversation(
-      {
-        agent: {
-          cwd,
-          instructions,
-          maxTurns: agent.maxTurns,
-          model: modelOf(agent),
-          ...(agent.thinking === ""
-            ? {}
-            : { thinkingLevel: agent.thinking as never }),
-        },
-        ownership: { kind: "ownerless" },
-      },
-      context
-    );
+    const settings = {
+      cwd,
+      instructions,
+      maxTurns: agent.maxTurns,
+      model: modelOf(agent),
+      ...(agent.thinking === ""
+        ? {}
+        : { thinkingLevel: agent.thinking as never }),
+    };
+    // A task that a person gave back goes on in the conversation that the agent had: it knows what it did.
+    const kept =
+      run.conversationId === null
+        ? undefined
+        : await harness.conversation(run.conversationId as never, context);
+    const conversation =
+      kept ??
+      (await harness.createConversation(
+        { agent: settings, ownership: { kind: "ownerless" } },
+        context
+      ));
+    if (kept !== undefined) {
+      await kept.configure(settings, context);
+    }
     contexts.set(conversation.id, runContext);
     envs.set(conversation.id, env);
     const submission = await conversation.submit(
-      { content: threadText(thread), requestId: run.id, type: "input" },
+      {
+        content:
+          kept === undefined
+            ? threadText(thread)
+            : `${CONTINUED}\n\n${threadText(thread)}`,
+        requestId: run.id,
+        type: "input",
+      },
       context
     );
     store.updateRun(run.id, {
@@ -390,6 +402,14 @@ export const startRunner = async (options: {
     work();
   };
 
+  /** The conversation of the agent's last run of the task, when a person gave the task back. */
+  const keptOf = (agent: string, task: string) => {
+    const [before] = store.runs({ agent, task }, 1);
+    return before !== undefined && GIVEN_BACK.includes(before.state)
+      ? before.conversationId
+      : null;
+  };
+
   /** Give the ready tasks to the agents that do their channels and have time. */
   const assign = async () => {
     const agents = store.list("agents").filter((agent) => agent.enabled);
@@ -439,12 +459,16 @@ export const startRunner = async (options: {
         title: firstLine(message.text),
         tokens: 0,
       };
+      const kept = keptOf(agent.name, message.id);
       store.insertRun(run);
+      if (kept !== null) {
+        store.updateRun(run.id, { conversationId: kept });
+      }
       busy.set(agent.name, (busy.get(agent.name) ?? 0) + 1);
       log(
         `run ${run.id}: ${agent.name} takes #${message.id} in #${message.channel}`
       );
-      launch(run);
+      launch({ ...run, conversationId: kept });
     }
   };
 
@@ -469,7 +493,7 @@ export const startRunner = async (options: {
   };
 
   /** The next time of each schedule, by `agent|index|cron|zone`: a changed schedule starts again. */
-  const due = new Map<string, number>();
+  const due = store.scheduleTimes();
   const fireSchedules = async () => {
     const now = Date.now();
     const all = store.list("agents").flatMap((agent) =>
@@ -483,16 +507,17 @@ export const startRunner = async (options: {
     const keys = new Set(all.map((one) => one.key));
     for (const key of [...due.keys()].filter((one) => !keys.has(one))) {
       due.delete(key);
+      store.removeScheduleTime(key);
     }
-    // A schedule that is new has no time yet: it gets its first time, and does not fire.
+    // A schedule that is new has no time yet: it gets its first time, and does not fire. A schedule
+    // that was due while Factory was down has its old time: it fires now, one time.
     const late = all.filter((one) => now >= (due.get(one.key) ?? now + 1));
     for (const one of all) {
       if (!due.has(one.key) || late.includes(one)) {
         const next = nextRun(one.schedule, new Date(now));
-        due.set(
-          one.key,
-          next === null ? Number.POSITIVE_INFINITY : next.getTime()
-        );
+        const at = next === null ? Number.MAX_SAFE_INTEGER : next.getTime();
+        due.set(one.key, at);
+        store.setScheduleTime(one.key, at);
       }
     }
     await Promise.all(

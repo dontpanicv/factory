@@ -16,6 +16,8 @@ export interface FlowNode {
   readonly label: string;
   /** The median time of an agent's run on a task of the channel, or null. */
   readonly medianRunMs: number | null;
+  /** The median time from a task's start to its first run, or null. */
+  readonly medianWaitMs: number | null;
   /** Tasks that are not finished. */
   readonly open: number;
   readonly total: number;
@@ -112,6 +114,7 @@ export const flowOf = (
       kind: "source" as const,
       label: source,
       medianRunMs: null,
+      medianWaitMs: null,
       open: 0,
       total: 0,
     })),
@@ -127,6 +130,16 @@ export const flowOf = (
           .filter((run) => run.channel === path && run.endedAt !== null)
           .map((run) => (run.endedAt as number) - run.startedAt)
       ),
+      medianWaitMs: median(
+        list.flatMap((task) => {
+          const starts = runs
+            .filter((run) => run.taskId === task.id)
+            .map((run) => run.startedAt);
+          return starts.length === 0
+            ? []
+            : Math.max(0, Math.min(...starts) - Date.parse(task.createdAt));
+        })
+      ),
       open: list.filter((task) => ENDS[task.task?.state ?? ""] === undefined)
         .length,
       total: list.length,
@@ -139,6 +152,7 @@ export const flowOf = (
         kind: "end" as const,
         label: end,
         medianRunMs: null,
+        medianWaitMs: null,
         open: 0,
         total: 0,
       })),

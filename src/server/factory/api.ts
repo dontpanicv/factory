@@ -3,7 +3,13 @@ import type { Board } from "@vercel/board";
 import { loadFlow } from "./flow.ts";
 import type { Runner } from "./runner.ts";
 import { DEFAULT_IMAGE, type SandboxProvider } from "./sandbox.ts";
-import { isKind, parseEnv, type Store } from "./store.ts";
+import {
+  isKind,
+  type Kind,
+  type Resource,
+  resourceSpec,
+  type Store,
+} from "./store.ts";
 
 /**
  * Factory's REST API at `/api/factory`: the definitions (agents, projects, shared resources,
@@ -40,7 +46,10 @@ const overview = async ({
   store,
 }: FactoryParts) => {
   const next = runner.nextRuns();
-  const states = await provider.resourceStates().catch(() => null);
+  const resources = store.list("resources");
+  const states = await provider
+    .resourceStates(resources.map((resource) => resourceSpec(resource, store)))
+    .catch(() => null);
   return {
     agents: store.list("agents").map((agent) => ({
       ...agent,
@@ -56,7 +65,7 @@ const overview = async ({
       (model) => `${model.provider}/${model.id}`
     ),
     projects: store.list("projects"),
-    resources: store.list("resources").map((resource) => ({
+    resources: resources.map((resource) => ({
       ...resource,
       // `unknown`: the provider did not answer (Docker does not run).
       state: states === null ? "unknown" : (states[resource.name] ?? "stopped"),
@@ -140,19 +149,36 @@ const power = async (parts: FactoryParts, name: string, action: string) => {
   if (resource === null) {
     return problem(404, "not_found", "No such resource.");
   }
-  await parts.provider.resourceDown(name);
+  const spec = resourceSpec(resource, parts.store);
+  await parts.provider.resourceDown(spec);
   if (action === "start") {
-    await parts.provider.resourceUp({
-      command: resource.command,
-      env: {
-        ...parseEnv(resource.env),
-        ...parts.store.secrets(resource.secrets),
-      },
-      image: resource.image,
-      name,
-    });
+    await parts.provider.resourceUp(spec);
   }
   return json({ ok: true });
+};
+
+/** Save a definition. A shared resource that runs starts again, so the change applies at once. */
+const save = async (parts: FactoryParts, kind: Kind, input: unknown) => {
+  const { provider, store } = parts;
+  if (kind !== "resources") {
+    return store.put(kind, input);
+  }
+  const wanted = input as Partial<Resource>;
+  if ((wanted.image ?? "") === "" && (wanted.container ?? "") === "") {
+    throw new Error(
+      "A shared resource needs an image, or the name of a container that runs."
+    );
+  }
+  const before = store.get("resources", String(wanted.name ?? ""));
+  const old = before === null ? null : resourceSpec(before, store);
+  const states: Record<string, string> =
+    old === null ? {} : await provider.resourceStates([old]).catch(() => ({}));
+  const saved = store.put("resources", input);
+  if (old !== null && states[old.name] === "running") {
+    await provider.resourceDown(old);
+    await provider.resourceUp(resourceSpec(saved, store));
+  }
+  return saved;
 };
 
 const definitions = async ({ body, method, parts, path }: Call): Answer => {
@@ -165,14 +191,15 @@ const definitions = async ({ body, method, parts, path }: Call): Answer => {
     if (method !== "POST") {
       return null;
     }
-    const saved = store.put(kind, await body());
+    const saved = await save(parts, kind, await body());
     runner.tick();
     return json(saved);
   }
   if (action === undefined && method === "DELETE") {
+    const resource = kind === "resources" ? store.get("resources", name) : null;
     store.remove(kind, name);
-    if (kind === "resources") {
-      await provider.resourceDown(name);
+    if (resource !== null) {
+      await provider.resourceDown(resourceSpec(resource, store));
     }
     return json({ ok: true });
   }

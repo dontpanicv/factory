@@ -40,7 +40,7 @@ interface Part {
 }
 
 const ENTRY_PAGE = 500;
-const OUTPUT_MAX = 4000;
+const OUTPUT_MAX = 20_000;
 /** The argument that says most about a call of each tool. */
 const MAIN_ARGUMENTS = [
   "command",

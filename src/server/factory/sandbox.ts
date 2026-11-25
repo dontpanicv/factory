@@ -34,6 +34,8 @@ export interface Box {
 
 export interface ResourceSpec {
   readonly command: string;
+  /** A container that runs already. Empty: the provider starts a container from `image`. */
+  readonly container: string;
   readonly env: Readonly<Record<string, string>>;
   readonly image: string;
   readonly name: string;
@@ -43,10 +45,12 @@ export interface SandboxProvider {
   /** The ids of the boxes that exist. */
   readonly boxes: () => Promise<string[]>;
   readonly kind: string;
-  /** Remove a shared resource. */
-  readonly resourceDown: (name: string) => Promise<void>;
-  /** The state of each shared resource that exists: `running`, `exited`. */
-  readonly resourceStates: () => Promise<Record<string, string>>;
+  /** Stop a shared resource. A container that Factory did not start only leaves the resource's network. */
+  readonly resourceDown: (spec: ResourceSpec) => Promise<void>;
+  /** The state of each shared resource: `running`, `exited`, or `stopped` when sandboxes cannot reach it. */
+  readonly resourceStates: (
+    specs: readonly ResourceSpec[]
+  ) => Promise<Record<string, string>>;
   /** Start a shared resource, if it does not run. */
   readonly resourceUp: (spec: ResourceSpec) => Promise<void>;
   /** Make the box, or find it again, with the daemon in it. */
@@ -54,13 +58,16 @@ export interface SandboxProvider {
   readonly stop: (id: string) => Promise<void>;
 }
 
-export const DEFAULT_IMAGE = "factory-sandbox:1";
+export const DEFAULT_IMAGE = "factory-sandbox:2";
 
-/** The Factory image: small, with the tools that an agent needs for a Git repository. */
+/** The Factory image: small, with what an agent needs for a Git repository, and Bun and Python for its checks. */
 const DOCKERFILE = `FROM debian:bookworm-slim
 RUN apt-get update \\
- && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client ripgrep jq unzip \\
+ && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client ripgrep jq unzip python3 \\
  && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://bun.sh/install | bash \\
+ && ln -s /root/.bun/bin/bun /usr/local/bin/bun \\
+ && ln -s /root/.bun/bin/bun /usr/local/bin/bunx
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
 `;
@@ -173,29 +180,51 @@ export const docker = (): SandboxProvider => ({
       : names.split("\n").map((name) => name.slice(BOX.length));
   },
   kind: "docker",
-  resourceDown: async (name) => {
-    await run(["rm", "-f", `${RESOURCE}${name}`]);
+  resourceDown: async (spec) => {
+    const network = `${RESOURCE}${spec.name}`;
+    await (spec.container === ""
+      ? run(["rm", "-f", network])
+      : run(["network", "disconnect", network, spec.container]));
   },
-  resourceStates: async () => {
-    const lines = await must([
-      "ps",
-      "-a",
-      "--filter",
-      "label=factory=resource",
-      "--format",
-      "{{.Names}}\t{{.State}}",
-    ]);
-    const states: Record<string, string> = {};
-    for (const line of lines === "" ? [] : lines.split("\n")) {
-      const [name, value] = line.split("\t");
-      if (name !== undefined && value !== undefined) {
-        states[name.slice(RESOURCE.length)] = value;
-      }
-    }
-    return states;
+  resourceStates: async (specs) => {
+    const states = await Promise.all(
+      specs.map(async (spec) => {
+        const network = `${RESOURCE}${spec.name}`;
+        if (spec.container === "") {
+          return [spec.name, (await state(network)) ?? "stopped"] as const;
+        }
+        // A container of someone else: sandboxes reach it only while it is on the resource's network.
+        const joined = await run([
+          "inspect",
+          "--format",
+          `{{if index .NetworkSettings.Networks "${network}"}}{{.State.Status}}{{end}}`,
+          spec.container,
+        ]);
+        return [
+          spec.name,
+          joined.stdout === "" ? "stopped" : joined.stdout,
+        ] as const;
+      })
+    );
+    return Object.fromEntries(states);
   },
   resourceUp: async (spec) => {
     const container = `${RESOURCE}${spec.name}`;
+    await ensureNetwork(container);
+    if (spec.container !== "") {
+      const joined = await run([
+        "network",
+        "connect",
+        "--alias",
+        spec.name,
+        container,
+        spec.container,
+      ]);
+      if (joined.code !== 0 && !joined.stderr.includes("already exists")) {
+        throw new Error(`docker network connect: ${joined.stderr}`);
+      }
+      return;
+    }
     const now = await state(container);
     if (now === "running") {
       return;
@@ -204,7 +233,6 @@ export const docker = (): SandboxProvider => ({
       await must(["start", container]);
       return;
     }
-    await ensureNetwork(container);
     await must(
       [
         "run",

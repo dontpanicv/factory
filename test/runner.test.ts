@@ -11,10 +11,16 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { localDaemon } from "@earendil-works/pi-env";
 import { makeBoard } from "../src/server/board.ts";
-import { FACTORY_SCHEMA } from "../src/server/db.ts";
+import { FACTORY_SCHEMA, SCHEDULE_SCHEMA } from "../src/server/db.ts";
 import { startRunner } from "../src/server/factory/runner.ts";
 import type { SandboxProvider } from "../src/server/factory/sandbox.ts";
-import { consumes, nextRun, Store } from "../src/server/factory/store.ts";
+import {
+  consumes,
+  nextRun,
+  Store,
+  secretKey,
+} from "../src/server/factory/store.ts";
+import { CHAIN_MAX } from "../src/server/factory/tools.ts";
 
 /** Boxes as directories on this computer, each with the pi-env daemon of this computer: no Docker. */
 const directories = (root: string, started: string[]): SandboxProvider => ({
@@ -35,24 +41,31 @@ const directories = (root: string, started: string[]): SandboxProvider => ({
   stop: () => Promise.resolve(),
 });
 
-const setup = async () => {
+const setup = async (
+  options: {
+    /** Runs on the store before the runner starts. */
+    readonly before?: (store: Store) => void;
+    readonly provider?: Partial<SandboxProvider>;
+  } = {}
+) => {
   const root = mkdtempSync(join(tmpdir(), "factory-test-"));
   const { team } = makeBoard({
     currentUser: () => Promise.resolve(null),
     dir: null,
     url: "http://localhost:4310/api/board",
   });
-  const store = new Store(":memory:");
-  store.createTables(FACTORY_SCHEMA);
+  const store = new Store(":memory:", secretKey("test"));
+  store.createTables([...FACTORY_SCHEMA, ...SCHEDULE_SCHEMA]);
   const faux = fauxProvider({ provider: "faux" });
   const models = createModels();
   models.setProvider(faux.provider);
   const started: string[] = [];
+  options.before?.(store);
   const runner = await startRunner({
     board: team,
     file: null,
     models,
-    provider: directories(root, started),
+    provider: { ...directories(root, started), ...options.provider },
     store,
   });
   return { faux, root, runner, started, store, team };
@@ -232,5 +245,97 @@ test("a schedule makes a task for its agent, and channels match by prefix", asyn
   expect(consumes(pipes, "pipesx")).toBe(false);
   expect(consumes(pipes, "dev")).toBe(true);
   expect(consumes(pipes, "dev/x")).toBe(false);
+  await runner.close();
+});
+
+test("a task that a person gives back goes on in the same conversation", async () => {
+  const { faux, runner, store, team } = await setup();
+  store.put("agents", { channels: ["dev"], model: MODEL, name: "dev" });
+  await team.createChannel("dev");
+  let second = "";
+  faux.setResponses([
+    call("task_block", { question: "Which branch?" }),
+    (transcript) => {
+      second = JSON.stringify(transcript);
+      return fauxAssistantMessage([fauxText("Released from main.")]);
+    },
+  ]);
+  const { task } = await team.tasks.create("dev", "Release it");
+  await runner.tick();
+  await runner.whenIdle();
+  await team.reply(task.id, "Use main.");
+  await team.tasks.unblock(task.id);
+  await runner.tick();
+  await runner.whenIdle();
+  const [last, first] = store.runs({ task: task.id });
+  expect(first?.state).toBe("blocked");
+  expect(last?.state).toBe("done");
+  expect(last?.conversationId).toBe(first?.conversationId as number);
+  // The agent sees its own question, the answer, and that its sandbox is new.
+  expect(second).toContain("Which branch?");
+  expect(second).toContain("Use main.");
+  expect(second).toContain("Your sandbox is new");
+  await runner.close();
+});
+
+test("a chain of agents' tasks stops, and a broken sandbox fails the task", async () => {
+  const { runner, store, team } = await setup({
+    provider: { start: () => Promise.reject(new Error("no docker")) },
+  });
+  store.put("agents", { channels: ["dev"], model: MODEL, name: "dev" });
+  await team.createChannel("dev");
+  const { task } = await team.tasks.create("dev", "Fix it");
+  await runner.tick();
+  await runner.whenIdle();
+  const [run] = store.runs({ task: task.id });
+  expect(run?.state).toBe("error");
+  expect(run?.note).toContain("no docker");
+  expect((await team.thread(task.id)).message.task?.state).toBe("failed");
+  await runner.close();
+
+  const next = await setup();
+  next.store.put("agents", { channels: ["dev"], model: MODEL, name: "dev" });
+  await next.team.createChannel("dev");
+  await next.team.createChannel("review");
+  next.faux.setResponses([
+    call("board_task", { channel: "review", text: "Review it" }),
+    fauxAssistantMessage([fauxText("The chain is at its end.")]),
+  ]);
+  const deep = await next.team.tasks.create("dev", {
+    labels: { "factory.depth": String(CHAIN_MAX) },
+    text: "Fix it again",
+  });
+  await next.runner.tick();
+  await next.runner.whenIdle();
+  const steps = await next.runner.steps(
+    next.store.runs({ task: deep.task.id })[0] as never
+  );
+  expect(steps[0]?.failed).toBe(true);
+  expect(steps[0]?.output).toContain("A chain stops at");
+  expect((await next.team.tasks.list({ channel: "review" })).tasks).toEqual([]);
+  await next.runner.close();
+});
+
+test("a schedule that was due while Factory was down fires at the start", async () => {
+  const schedule = {
+    channel: "ops",
+    cron: "0 8 * * *",
+    text: "Check the logs",
+    zone: "UTC",
+  };
+  const { runner, store, team } = await setup({
+    before: (early) => {
+      early.put("agents", { name: "sre", schedules: [schedule] });
+      early.setScheduleTime("sre|0|0 8 * * *|UTC", Date.now() - 60_000);
+    },
+  });
+  await runner.whenIdle();
+  const made = (await team.tasks.list({ channel: "ops", state: "all" })).tasks;
+  expect(made.length).toBe(1);
+  expect(made[0]?.message.labels["factory.schedule"]).toBe("1");
+  // The next time is in the future again, and it is kept.
+  expect(store.scheduleTimes().get("sre|0|0 8 * * *|UTC")).toBeGreaterThan(
+    Date.now()
+  );
   await runner.close();
 });

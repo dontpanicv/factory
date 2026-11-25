@@ -46,6 +46,14 @@ export const FACTORY_SCHEMA = [
   "CREATE INDEX runs_agent ON runs (agent, started_at)",
 ];
 
+/** The next time of each schedule, so a schedule that was due while Factory was down fires late. */
+export const SCHEDULE_SCHEMA = [
+  `CREATE TABLE schedule_times (
+    key TEXT PRIMARY KEY,
+    next_at INTEGER NOT NULL
+  )`,
+];
+
 export const migrations = SqliteMigrator.fromRecord({
   "0001_access_checks": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -59,6 +67,12 @@ export const migrations = SqliteMigrator.fromRecord({
   "0002_factory": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     for (const statement of FACTORY_SCHEMA) {
+      yield* sql.unsafe(statement);
+    }
+  }),
+  "0003_schedule_times": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    for (const statement of SCHEDULE_SCHEMA) {
       yield* sql.unsafe(statement);
     }
   }),

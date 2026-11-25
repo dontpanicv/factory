@@ -31,6 +31,8 @@ export interface RunContext {
 const say = (text: string) => ({ output: [{ text, type: "text" as const }] });
 
 const TITLE_MAX = 120;
+/** The most tasks in a row that agents make from each other's tasks, before a person must decide. */
+export const CHAIN_MAX = 12;
 const taskRow = (message: MessageView) =>
   `#${message.id} [${message.task?.state ?? "thread"}] #${message.channel} ${message.text.split("\n")[0]?.slice(0, TITLE_MAX)} (from ${actorName(message.by.actor)})`;
 
@@ -97,9 +99,23 @@ export const boardTools = (
           "Make a task in a channel, to hand work to the agents or the people of that channel. The text must be complete without your thread: what to do, where, and how to know that it is done.",
         execute: async (args, api) => {
           const context = need(api.conversationId);
+          const mine = await context.me.thread(context.taskId, { limit: 1 });
+          const depth = Number(mine.message.labels["factory.depth"] ?? "0");
+          if (depth >= CHAIN_MAX) {
+            return {
+              ...say(
+                `This task is number ${depth} in a chain of tasks that agents made. A chain stops at ${CHAIN_MAX}: give the work to a person with task_block.`
+              ),
+              isError: true,
+            };
+          }
           const made = await context.me.tasks.create(args.channel, {
-            // The flow page reads where each task came from.
-            labels: { "factory.from": context.taskId },
+            labels: {
+              // How long the chain of agents' tasks is, so it cannot go on without an end.
+              "factory.depth": String(depth + 1),
+              // The flow page reads where each task came from.
+              "factory.from": context.taskId,
+            },
             text: args.text,
           });
           return say(`Task #${made.task.id} is in #${args.channel}.`);

@@ -1,4 +1,10 @@
 import { Database } from "bun:sqlite";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from "node:crypto";
 import { Cron, Effect, Schema } from "effect";
 
 /**
@@ -73,10 +79,12 @@ export type Project = typeof Project.Type;
 export const Resource = Schema.Struct({
   /** The command of the container. Empty: the command of the image. */
   command: text(),
+  /** A container that runs already and Factory does not start: sandboxes reach it by the resource's name. */
+  container: text(),
   description: text(),
   /** `KEY=value` lines. */
   env: text(),
-  image: Schema.String,
+  image: text(),
   name: Name,
   /** Secrets that the container gets as environment variables. */
   secrets: names,
@@ -116,6 +124,15 @@ export const consumes = (
       ? channel === pattern.slice(0, -1) || channel.startsWith(pattern)
       : channel === pattern
   );
+
+/** A shared resource as its sandbox provider starts it: with its environment and its secrets. */
+export const resourceSpec = (resource: Resource, store: Store) => ({
+  command: resource.command,
+  container: resource.container,
+  env: { ...parseEnv(resource.env), ...store.secrets(resource.secrets) },
+  image: resource.image,
+  name: resource.name,
+});
 
 export const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 
@@ -232,12 +249,90 @@ const RUN_COLUMNS: Record<string, string> = {
   tokens: "tokens",
 };
 
+const SEALED = "v1:";
+const IV_BYTES = 12;
+
+/** The key that seals the secrets, from a passphrase of any length. */
+export const secretKey = (passphrase: string) =>
+  createHash("sha256").update(passphrase).digest();
+
 export class Store {
   readonly #db: Database;
+  readonly #key: Buffer;
 
-  constructor(file: string) {
+  /** `key` seals the values of the secrets in the file (AES-256-GCM). */
+  constructor(file: string, key: Buffer) {
     this.#db = new Database(file);
     this.#db.run("PRAGMA busy_timeout = 5000");
+    this.#key = key;
+  }
+
+  #seal(value: string) {
+    const iv = randomBytes(IV_BYTES);
+    const cipher = createCipheriv("aes-256-gcm", this.#key, iv);
+    const sealed = Buffer.concat([
+      cipher.update(value, "utf8"),
+      cipher.final(),
+    ]);
+    return `${SEALED}${[iv, cipher.getAuthTag(), sealed].map((part) => part.toString("base64")).join(":")}`;
+  }
+
+  #open(stored: string) {
+    if (!stored.startsWith(SEALED)) {
+      return stored;
+    }
+    const [iv = "", tag = "", sealed = ""] = stored
+      .slice(SEALED.length)
+      .split(":");
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      this.#key,
+      Buffer.from(iv, "base64")
+    );
+    decipher.setAuthTag(Buffer.from(tag, "base64"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(sealed, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+  }
+
+  /** Seal the secrets that an older Factory kept as plain text. */
+  sealSecrets() {
+    const plain = this.#db
+      .query<{ name: string; value: string }, [string]>(
+        "SELECT name, value FROM secrets WHERE value NOT LIKE ?"
+      )
+      .all(`${SEALED}%`);
+    for (const row of plain) {
+      this.#db
+        .query("UPDATE secrets SET value = ? WHERE name = ?")
+        .run(this.#seal(row.value), row.name);
+    }
+  }
+
+  /** The next time of each schedule, by its key. */
+  scheduleTimes(): Map<string, number> {
+    return new Map(
+      this.#db
+        .query<{ key: string; next_at: number }, []>(
+          "SELECT key, next_at FROM schedule_times"
+        )
+        .all()
+        .map((row) => [row.key, row.next_at])
+    );
+  }
+
+  setScheduleTime(key: string, at: number) {
+    this.#db
+      .query(
+        `INSERT INTO schedule_times (key, next_at) VALUES (?, ?)
+         ON CONFLICT (key) DO UPDATE SET next_at = excluded.next_at`
+      )
+      .run(key, at);
+  }
+
+  removeScheduleTime(key: string) {
+    this.#db.query("DELETE FROM schedule_times WHERE key = ?").run(key);
   }
 
   /** For a database without the migrations (tests). */
@@ -301,11 +396,12 @@ export class Store {
   }
 
   secret(name: string): string | undefined {
-    return this.#db
+    const stored = this.#db
       .query<{ value: string }, [string]>(
         "SELECT value FROM secrets WHERE name = ?"
       )
       .get(name)?.value;
+    return stored === undefined ? undefined : this.#open(stored);
   }
 
   /** The secrets of these names that exist, as environment variables. */
@@ -331,7 +427,7 @@ export class Store {
         `INSERT INTO secrets (name, value, updated_at) VALUES (?, ?, ?)
          ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
       )
-      .run(name, value, Date.now());
+      .run(name, this.#seal(value), Date.now());
   }
 
   removeSecret(name: string) {

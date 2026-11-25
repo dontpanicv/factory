@@ -119,7 +119,9 @@ export const isAgent = (actor: string | null | undefined) =>
 
 /** The labels that people set and read; the board's own labels stay hidden. */
 export const visibleLabels = (labels: Readonly<Record<string, string>>) =>
-  Object.entries(labels).filter(([key]) => !key.startsWith("board."));
+  Object.entries(labels).filter(
+    ([key]) => !key.startsWith("board.") && key !== "factory.depth"
+  );
 
 /**
  * A task's state now. A claim past its lease is over, so the task is ready, whatever the board last
